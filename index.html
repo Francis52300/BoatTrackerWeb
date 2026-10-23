@@ -16,6 +16,33 @@
         /* On cache uniquement les boutons de zoom (+/-) par défaut */
         .leaflet-control-zoom { display: none !important; }
         
+        /* --- RESTAURATION DU BOUTON DE ROTATION --- */
+        .leaflet-control-rotate {
+            position: absolute !important;
+            top: 90px !important; 
+            right: 20px !important;
+            margin: 0 !important;
+            z-index: 1000 !important;
+            background: white !important;
+            border-radius: 50% !important;
+            border: 2px solid #1976D2 !important;
+            width: 50px !important;
+            height: 50px !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+        }
+        .leaflet-control-rotate a {
+            width: 100% !important;
+            height: 100% !important;
+            font-size: 24px !important;
+            line-height: 46px !important;
+            color: #1976D2 !important;
+            text-align: center !important;
+            text-decoration: none !important;
+        }
+
         /* Panneau bas */
         #panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -54,9 +81,10 @@
             border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             display: flex; justify-content: center; align-items: center; border: 2px solid #1976D2;
         }
-        #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
-        #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
-        #btn-download { top: 220px; right: 20px; }
+        /* Le bouton de rotation est à 90px */
+        #btn-recenter { display: none; top: 155px; right: 20px; color: #1976D2; }
+        #btn-save-poi { top: 220px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
+        #btn-download { top: 285px; right: 20px; }
 
         /* Boussole interne */
         #compass-degrees {
@@ -214,11 +242,10 @@
 
     <script>
         // --- INITIALISATION DE LA CARTE ---
-        // LA CORRECTION EST ICI : rotateControl: false empêche la création du bouton noir gênant
         const map = L.map('map', { 
             rotate: true, 
-            rotateControl: false, // Cache le bouton natif tout en gardant la fonction rotation
-            touchRotate: true,    // Permet à l'utilisateur de tourner manuellement avec 2 doigts
+            rotateControl: true, // ON REMET LE BOUTON
+            touchRotate: true,    
             zoomControl: false    
         }).setView([48.5850, 4.7500], 14);
         
@@ -377,8 +404,9 @@
             document.getElementById('heading-val').textContent = Math.round(brng) + '°';
 
             if (isAutoCenter) {
-                map.setView(currentLatLng, map.getZoom(), {animate: false});
-                map.setBearing(brng);
+                // CORRECTION : Utilisation de panTo au lieu de setView pour ne pas annuler la rotation
+                map.panTo(currentLatLng, {animate: false, duration: 0});
+                map.setBearing(brng, {animate: false});
                 document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             } else {
                 const visualAngle = brng - map.getBearing();
