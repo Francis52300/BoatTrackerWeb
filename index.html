@@ -13,6 +13,9 @@
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
         
+        /* --- CORRECTION : On cache les boutons de zoom par défaut de Leaflet --- */
+        .leaflet-control-zoom { display: none !important; }
+        
         /* Panneau bas */
         #panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -44,7 +47,7 @@
         }
         #btn-menu { top: 15px; left: 15px; }
         
-        /* NOUVELLE DISPOSITION À DROITE */
+        /* DISPOSITION À DROITE */
         #compass-container {
             position: absolute; top: 15px; right: 15px; z-index: 1000;
             width: 60px; height: 60px; background: rgba(255, 255, 255, 0.9);
@@ -213,8 +216,8 @@
         // --- INITIALISATION DE LA CARTE ---
         const map = L.map('map', { 
             rotate: true, 
-            touchRotate: false, // Désactivé pour éviter les conflits avec le centrage
-            zoomControl: false   // On enlève les boutons +/- par défaut pour faire de la place
+            touchRotate: false, 
+            zoomControl: false   // On désactive le contrôle de zoom par défaut
         }).setView([48.5850, 4.7500], 14);
         
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
@@ -229,7 +232,7 @@
         let tempViewPolyline = null;
         let activeDestination = null; 
         let activeRoute = null; 
-        let isAutoCenter = true; // NOUVEAU : Mode Waze
+        let isAutoCenter = true; 
 
         // --- Bateau ---
         const boatIcon = L.divIcon({
@@ -266,7 +269,6 @@
 
         // --- DÉTECTION DU DÉPLACEMENT MANUEL ---
         map.on('dragstart', () => {
-            // Si l'utilisateur touche la carte, on arrête le centrage auto
             if(activeDestination || activeRoute) {
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
@@ -275,7 +277,7 @@
 
         function resetMapView() {
             isAutoCenter = true;
-            map.setBearing(0); // Remet la carte vers le Nord
+            map.setBearing(0); 
             map.setView(userMarker.getLatLng(), map.getZoom(), {animate: true});
             document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             document.getElementById('btn-recenter').style.display = 'none';
@@ -297,7 +299,7 @@
             return (brng + 360) % 360;
         }
 
-        // --- GPS (Cœur de la navigation) ---
+        // --- GPS ---
         function startGPS() {
             if ("geolocation" in navigator) {
                 navigator.geolocation.watchPosition(
@@ -368,22 +370,15 @@
                 return;
             }
 
-            // Calcul et affichage du cap
             const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
             headingBox.style.display = 'block';
             document.getElementById('heading-val').textContent = Math.round(brng) + '°';
 
-            // --- CENTRAGE ET ROTATION ---
             if (isAutoCenter) {
-                // On centre d'abord la carte sur le bateau sans animation
                 map.setView(currentLatLng, map.getZoom(), {animate: false});
-                // Puis on tourne la carte
                 map.setBearing(brng);
-                // Le bateau pointe vers le haut de l'écran
                 document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             } else {
-                // Si on n'est pas en auto-center, le bateau tourne sur lui-même pour indiquer la direction
-                // On soustrait l'angle actuel de la carte pour que le bateau pointe au bon endroit
                 const visualAngle = brng - map.getBearing();
                 document.getElementById('boat-img').style.transform = `rotate(${visualAngle}deg)`;
             }
@@ -393,7 +388,7 @@
             return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
         }
 
-        // --- POINTS (Fonctions inchangées pour la plupart) ---
+        // --- POINTS ---
         map.on('contextmenu', function(e) {
             if (isBuildingRoute) return; 
             tempLatLng = e.latlng;
@@ -486,7 +481,6 @@
                 isAutoCenter = true;
                 document.getElementById('btn-recenter').style.display = 'none';
                 map.closePopup();
-                // On ne fitBounds plus, on laisse le GPS centrer la vue
             }
         }
 
