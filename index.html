@@ -17,8 +17,12 @@
             background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 15px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; width: 280px; text-align: center;
         }
-        #speed-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        /* NOUVEAU : Affichage Vitesse + Cap */
+        #speed-container { display: flex; justify-content: space-around; align-items: center; margin-bottom: 5px; }
         #speed { font-size: 42px; font-weight: bold; color: #1976D2; }
+        #heading-box { display: none; text-align: left; border-left: 2px solid #eee; padding-left: 15px;}
+        #heading-val { font-size: 28px; font-weight: bold; color: #d32f2f; }
+        
         #stats { font-size: 14px; color: #666; margin-bottom: 5px; }
         #navigation-info { font-size: 16px; font-weight: bold; color: #0056b3; margin-bottom: 5px; display: none; background: #e3f2fd; padding: 5px; border-radius: 5px;}
         
@@ -164,12 +168,22 @@
     <div id="panel">
         <div id="navigation-info">Navigation en cours...</div>
         <div id="speed-container">
-            <div id="speed">0.0</div>
             <div>
-                <button type="button" class="btn-unit active" id="btn-kmh" onclick="setUnit('kmh')">km/h</button>
-                <button type="button" class="btn-unit" id="btn-knots" onclick="setUnit('knots')">nd</button>
+                <div id="speed">0.0</div>
+                <div style="font-size:12px; color:#666; margin-top:-5px;">Vitesse</div>
+            </div>
+            <!-- NOUVEAU : Affichage du Cap -->
+            <div id="heading-box">
+                <div id="heading-val">0°</div>
+                <div style="font-size:12px; color:#666; margin-top:-5px;">Cap à suivre</div>
             </div>
         </div>
+        
+        <div style="margin-bottom: 10px;">
+            <button type="button" class="btn-unit active" id="btn-kmh" onclick="setUnit('kmh')">km/h</button>
+            <button type="button" class="btn-unit" id="btn-knots" onclick="setUnit('knots')">nd</button>
+        </div>
+        
         <div id="stats">Distance : 0 m</div>
         <button type="button" id="btn-record" onclick="toggleRecording()">Démarrer l'enregistrement</button>
     </div>
@@ -202,6 +216,11 @@
         let routePolyline = L.polyline([], {color: '#4caf50', weight: 5, dashArray: '10, 10'}).addTo(map);
         let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
+        
+        // Variables pour la vue temporaire et la navigation
+        let tempViewPolyline = null;
+        let activeDestination = null; 
+        let activeRoute = null; 
 
         // Marqueur de position
         let userMarker = L.circleMarker([48.5850, 4.7500], {
@@ -221,16 +240,12 @@
         let waypoints = JSON.parse(localStorage.getItem('boatWaypoints')) || [];
         let routes = JSON.parse(localStorage.getItem('boatTracks')) || [];
         
-        // Navigation active
-        let activeDestination = null; 
-        let activeRoute = null; 
-
         // Mode Création de route & Édition
         let isBuildingRoute = false;
         let routeBuilderPoints = [];
         let tempLatLng = null; 
         let editingWaypointId = null; 
-        let editingRouteIndex = null; // NOUVEAU : Pour renommer une trace
+        let editingRouteIndex = null; 
 
         const customIcon = L.divIcon({
             className: 'custom-div-icon', html: "📍",
@@ -244,6 +259,16 @@
         }
         function saveRoutesToStorage() {
             localStorage.setItem('boatTracks', JSON.stringify(routes));
+        }
+
+        // --- CALCUL DU CAP (Boussole mathématique) ---
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const rad = Math.PI / 180;
+            const dLon = (lon2 - lon1) * rad;
+            const y = Math.sin(dLon) * Math.cos(lat2 * rad);
+            const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) - Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos(dLon);
+            let brng = Math.atan2(y, x) / rad;
+            return (brng + 360) % 360;
         }
 
         // --- GPS ---
@@ -277,7 +302,7 @@
             }
         }
 
-        // --- NAVIGATION ---
+        // --- NAVIGATION & CAP ---
         function updateNavigationDistances(currentLatLng) {
             waypoints.forEach(wp => {
                 if(wp.marker) {
@@ -290,21 +315,36 @@
             });
 
             const navInfo = document.getElementById('navigation-info');
+            const headingBox = document.getElementById('heading-box');
+            
             if (activeDestination) {
                 const destLatLng = L.latLng(activeDestination.lat, activeDestination.lng);
+                const dist = currentLatLng.distanceTo(destLatLng);
+                const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, destLatLng.lat, destLatLng.lng);
+                
                 navInfo.style.display = 'block';
-                navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(currentLatLng.distanceTo(destLatLng))}`;
+                navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(dist)}`;
                 navPolyline.setLatLngs([currentLatLng, destLatLng]);
+                
+                headingBox.style.display = 'block';
+                document.getElementById('heading-val').textContent = Math.round(brng) + '°';
             } 
             else if (activeRoute && activeRoute.points.length > 0) {
                 const endPoint = activeRoute.points[activeRoute.points.length - 1];
+                const dist = currentLatLng.distanceTo(L.latLng(endPoint[0], endPoint[1]));
+                const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, endPoint[0], endPoint[1]);
+                
                 navInfo.style.display = 'block';
-                navInfo.innerHTML = `Route: ${activeRoute.name}<br>Arrivée: ${formatDist(currentLatLng.distanceTo(L.latLng(endPoint[0], endPoint[1])))}`;
+                navInfo.innerHTML = `Route: ${activeRoute.name}<br>Arrivée: ${formatDist(dist)}`;
                 navPolyline.setLatLngs([]); 
+                
+                headingBox.style.display = 'block';
+                document.getElementById('heading-val').textContent = Math.round(brng) + '°';
             } 
             else {
                 navInfo.style.display = 'none';
                 navPolyline.setLatLngs([]);
+                headingBox.style.display = 'none';
             }
         }
 
@@ -346,7 +386,6 @@
             }
         }
 
-        // NOUVEAU : Modifier le nom d'une trace
         function editRouteName(index) {
             editingRouteIndex = index;
             editingWaypointId = null;
@@ -361,11 +400,10 @@
             
             if (name) {
                 if (editingRouteIndex !== null) {
-                    // Modification d'une trace
                     routes[editingRouteIndex].name = name;
                     saveRoutesToStorage();
+                    if(activeRoute && activeRoute.name !== name) activeRoute.name = name; // Met à jour si en cours de navigation
                 } else if (editingWaypointId) {
-                    // Modification d'un point
                     const wp = waypoints.find(w => w.id === editingWaypointId);
                     if (wp) {
                         wp.name = name;
@@ -373,7 +411,6 @@
                         saveWaypointsToStorage();
                     }
                 } else if (tempLatLng) {
-                    // Nouveau point
                     const wp = { id: Date.now(), name: name, lat: tempLatLng.lat, lng: tempLatLng.lng };
                     waypoints.push(wp);
                     saveWaypointsToStorage();
@@ -402,9 +439,13 @@
         function navigateToPoint(id) {
             const wp = waypoints.find(w => w.id === id);
             if (wp) {
+                // --- NETTOYAGE AVANT NOUVELLE NAVIGATION ---
+                if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+                routePolyline.setLatLngs([]); 
+                
                 activeDestination = wp;
                 activeRoute = null;
-                routePolyline.setLatLngs([]); 
+                
                 map.closePopup();
                 map.fitBounds([userMarker.getLatLng(), L.latLng(wp.lat, wp.lng)], {padding: [50, 50]});
             }
@@ -416,28 +457,36 @@
                 saveWaypointsToStorage();
                 waypointLayer.clearLayers();
                 waypoints.forEach(drawWaypoint);
-                if(activeDestination && activeDestination.id === id) activeDestination = null;
+                if(activeDestination && activeDestination.id === id) {
+                    activeDestination = null;
+                    document.getElementById('navigation-info').style.display = 'none';
+                    document.getElementById('heading-box').style.display = 'none';
+                }
                 closeMenu();
             }
         }
 
         // --- ROUTES (TRACES) ---
-        // NOUVEAU : Voir une trace sans la suivre
         function viewRoute(index) {
+            // --- NETTOYAGE AVANT NOUVELLE VUE ---
+            if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+            routePolyline.setLatLngs([]);
+            navPolyline.setLatLngs([]);
+            
             const rt = routes[index];
-            const tempPolyline = L.polyline(rt.points, {color: '#1976D2', weight: 5}).addTo(map);
-            map.fitBounds(tempPolyline.getBounds());
-            // Disparaît au prochain clic sur la carte
-            map.once('click', () => map.removeLayer(tempPolyline));
+            tempViewPolyline = L.polyline(rt.points, {color: '#1976D2', weight: 5}).addTo(map);
+            map.fitBounds(tempViewPolyline.getBounds());
             closeMenu();
         }
 
-        // NOUVEAU : Supprimer une trace
         function deleteRoute(index) {
             if(confirm("Supprimer cette trace définitivement ?")) {
+                const routeToDelete = routes[index];
                 routes.splice(index, 1);
                 saveRoutesToStorage();
-                if (activeRoute === routes[index]) stopFollowingRoute();
+                if (activeRoute === routeToDelete) {
+                    stopFollowingRoute();
+                }
                 closeMenu();
             }
         }
@@ -452,7 +501,6 @@
             routeBuilderPolyline.setLatLngs([]);
             closeMenu();
 
-            // NOUVEAU : Choix du point de départ
             const startFromCurrent = confirm("Voulez-vous commencer cette route depuis votre position actuelle ?\n\n(Cliquez sur 'Annuler' pour commencer directement par choisir un point sur la carte)");
             
             if (startFromCurrent) {
@@ -496,6 +544,10 @@
         }
 
         function startFollowingRoute(index) {
+            // --- NETTOYAGE AVANT NOUVELLE NAVIGATION ---
+            if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+            navPolyline.setLatLngs([]);
+            
             activeRoute = routes[index];
             activeDestination = null;
             routePolyline.setLatLngs(activeRoute.points);
@@ -504,10 +556,19 @@
         }
 
         function stopFollowingRoute() {
+            // --- EFFACEMENT TOTAL DE LA NAVIGATION ---
             activeRoute = null;
+            activeDestination = null;
+            
             routePolyline.setLatLngs([]);
             navPolyline.setLatLngs([]);
+            if (tempViewPolyline) {
+                map.removeLayer(tempViewPolyline);
+                tempViewPolyline = null;
+            }
+            
             document.getElementById('navigation-info').style.display = 'none';
+            document.getElementById('heading-box').style.display = 'none';
         }
 
         // --- MENU INTERFACE ---
@@ -559,7 +620,7 @@
                 stopBtn.className = 'btn-danger';
                 stopBtn.style.marginTop = '10px';
                 stopBtn.innerText = "Arrêter la navigation";
-                stopBtn.onclick = () => { stopFollowingRoute(); activeDestination = null; closeMenu(); };
+                stopBtn.onclick = () => { stopFollowingRoute(); closeMenu(); };
                 routeList.appendChild(stopBtn);
             }
         }
