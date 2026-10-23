@@ -6,7 +6,6 @@
     <title>Trace Bateau - Lac du Der</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- NOUVEAU : Module de rotation de la carte -->
     <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
     
     <link rel="manifest" href="manifest.json">
@@ -37,30 +36,26 @@
         .btn-unit { width: auto; padding: 5px 10px; background: #e0e0e0; font-size: 14px; }
         .btn-unit.active { background: #1976D2; color: white; }
         
-        /* Boutons flottants */
+        /* Boutons flottants (alignés à droite) */
         .fab {
             position: absolute; z-index: 1000; background: white; border: 2px solid #1976D2;
             color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
             padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         #btn-menu { top: 15px; left: 15px; }
-        #btn-download { top: 115px; right: 15px; }
-        #btn-save-poi { top: 185px; right: 15px; color: #d32f2f; border-color: #d32f2f; }
         
-        /* NOUVEAU : Bouton pour recentrer / enlever la rotation */
-        #btn-recenter { 
-            display: none; top: 15px; right: 15px; width: 80px; height: 80px; border-radius: 50%;
-            background: rgba(255,255,255,0.9); border: 2px solid #1976D2; z-index: 1000;
-            text-align: center; line-height: 76px; font-size: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-        }
-
-        /* Boussole */
+        /* NOUVELLE DISPOSITION À DROITE */
         #compass-container {
-            position: absolute; top: 115px; right: 25px; z-index: 1000;
+            position: absolute; top: 15px; right: 15px; z-index: 1000;
             width: 60px; height: 60px; background: rgba(255, 255, 255, 0.9);
             border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             display: flex; justify-content: center; align-items: center; border: 2px solid #1976D2;
         }
+        #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
+        #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
+        #btn-download { top: 220px; right: 20px; }
+
+        /* Boussole interne */
         #compass-degrees {
             position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
             font-size: 12px; font-weight: bold; color: #333; background: white;
@@ -132,11 +127,10 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* NOUVEAU : Icône du bateau */
+        /* Icône du bateau */
         .boat-icon {
             font-size: 32px; line-height: 32px; text-align: center;
             filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.6));
-            transition: transform 0.3s ease-out;
         }
     </style>
 </head>
@@ -159,13 +153,10 @@
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
 
+    <!-- Boutons de gauche -->
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
-    <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
-    <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
-    
-    <!-- Bouton de recentrage (apparaît en navigation) -->
-    <button type="button" id="btn-recenter" onclick="resetMapView()">🎯</button>
 
+    <!-- Boutons de droite (bien empilés) -->
     <div id="compass-container">
         <div class="compass-arrow"></div>
         <div id="compass-rose">
@@ -175,6 +166,11 @@
         <div id="compass-degrees">--°</div>
     </div>
 
+    <button type="button" class="fab" id="btn-recenter" onclick="resetMapView()">🎯</button>
+    <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
+    <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
+
+    <!-- Panneau bas -->
     <div id="panel">
         <div id="navigation-info">Navigation en cours...</div>
         <div id="speed-container">
@@ -214,29 +210,31 @@
     </div>
 
     <script>
-        // --- INITIALISATION DE LA CARTE (avec rotation) ---
+        // --- INITIALISATION DE LA CARTE ---
         const map = L.map('map', { 
             rotate: true, 
-            touchRotate: true 
+            touchRotate: false, // Désactivé pour éviter les conflits avec le centrage
+            zoomControl: false   // On enlève les boutons +/- par défaut pour faire de la place
         }).setView([48.5850, 4.7500], 14);
         
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
         // Calques
         let waypointLayer = L.layerGroup().addTo(map);
-        let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); // Rouge un peu transparent
-        let routePolyline = L.polyline([], {color: '#4caf50', weight: 6, dashArray: '10, 10'}).addTo(map); // Vert
+        let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); 
+        let routePolyline = L.polyline([], {color: '#4caf50', weight: 6, dashArray: '10, 10'}).addTo(map); 
         let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
         
         let tempViewPolyline = null;
         let activeDestination = null; 
         let activeRoute = null; 
+        let isAutoCenter = true; // NOUVEAU : Mode Waze
 
-        // --- NOUVEAU : Bateau à la place du point bleu ---
+        // --- Bateau ---
         const boatIcon = L.divIcon({
             className: 'boat-icon',
-            html: '<div id="boat-img" style="transition: transform 0.3s;">⛵</div>',
+            html: '<div id="boat-img" style="transition: transform 0.2s;">⛵</div>',
             iconSize: [32, 32],
             iconAnchor: [16, 16]
         });
@@ -266,6 +264,23 @@
             iconSize: [30, 42], iconAnchor: [15, 42], popupAnchor: [0, -35]
         });
 
+        // --- DÉTECTION DU DÉPLACEMENT MANUEL ---
+        map.on('dragstart', () => {
+            // Si l'utilisateur touche la carte, on arrête le centrage auto
+            if(activeDestination || activeRoute) {
+                isAutoCenter = false;
+                document.getElementById('btn-recenter').style.display = 'block';
+            }
+        });
+
+        function resetMapView() {
+            isAutoCenter = true;
+            map.setBearing(0); // Remet la carte vers le Nord
+            map.setView(userMarker.getLatLng(), map.getZoom(), {animate: true});
+            document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            document.getElementById('btn-recenter').style.display = 'none';
+        }
+
         function saveWaypointsToStorage() {
             const clean = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
             localStorage.setItem('boatWaypoints', JSON.stringify(clean));
@@ -282,7 +297,7 @@
             return (brng + 360) % 360;
         }
 
-        // --- GPS ---
+        // --- GPS (Cœur de la navigation) ---
         function startGPS() {
             if ("geolocation" in navigator) {
                 navigator.geolocation.watchPosition(
@@ -297,16 +312,15 @@
 
                         if (isFirstFix) { map.setView(newLatLng, 16); isFirstFix = false; }
 
-                        // --- NOUVEAU : On remonte la trace rouge au-dessus de tout ---
                         if (isRecording) {
                             currentPolyline.addLatLng(newLatLng);
                             currentPolyline.bringToFront(); 
-                            map.panTo(newLatLng); 
                             if (lastLatLng) distance += lastLatLng.distanceTo(newLatLng);
                             lastLatLng = newLatLng;
                             currentTrack.push([lat, lon]);
                             updateStats();
                         }
+                        
                         updateNavigationDistances(newLatLng);
                     },
                     (error) => console.error("Erreur GPS:", error),
@@ -329,17 +343,15 @@
 
             const navInfo = document.getElementById('navigation-info');
             const headingBox = document.getElementById('heading-box');
-            const btnRecenter = document.getElementById('btn-recenter');
             
             let targetLat = null, targetLng = null;
 
             if (activeDestination) {
                 targetLat = activeDestination.lat;
                 targetLng = activeDestination.lng;
-                const destLatLng = L.latLng(targetLat, targetLng);
                 navInfo.style.display = 'block';
-                navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(currentLatLng.distanceTo(destLatLng))}`;
-                navPolyline.setLatLngs([currentLatLng, destLatLng]);
+                navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(currentLatLng.distanceTo(L.latLng(targetLat, targetLng)))}`;
+                navPolyline.setLatLngs([currentLatLng, L.latLng(targetLat, targetLng)]);
             } 
             else if (activeRoute && activeRoute.points.length > 0) {
                 const endPoint = activeRoute.points[activeRoute.points.length - 1];
@@ -353,10 +365,6 @@
                 navInfo.style.display = 'none';
                 navPolyline.setLatLngs([]);
                 headingBox.style.display = 'none';
-                btnRecenter.style.display = 'none';
-                // Si on n'est plus en navigation, on remet la carte vers le Nord
-                if (map.getBearing() !== 0) map.setBearing(0);
-                document.getElementById('boat-img').style.transform = `rotate(0deg)`;
                 return;
             }
 
@@ -364,27 +372,28 @@
             const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
             headingBox.style.display = 'block';
             document.getElementById('heading-val').textContent = Math.round(brng) + '°';
-            btnRecenter.style.display = 'block';
 
-            // --- NOUVEAU : On fait pivoter la carte et le bateau ---
-            map.setBearing(brng);
-            document.getElementById('boat-img').style.transform = `rotate(${brng}deg)`;
-        }
-
-        // NOUVEAU : Bouton pour arrêter la rotation et revenir au Nord
-        function resetMapView() {
-            map.setBearing(0);
-            map.setView(userMarker.getLatLng(), 16);
-            // On remet le bateau droit
-            document.getElementById('boat-img').style.transform = `rotate(0deg)`;
-            alert("Vue réorientée vers le Nord. (La navigation reste active)");
+            // --- CENTRAGE ET ROTATION ---
+            if (isAutoCenter) {
+                // On centre d'abord la carte sur le bateau sans animation
+                map.setView(currentLatLng, map.getZoom(), {animate: false});
+                // Puis on tourne la carte
+                map.setBearing(brng);
+                // Le bateau pointe vers le haut de l'écran
+                document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            } else {
+                // Si on n'est pas en auto-center, le bateau tourne sur lui-même pour indiquer la direction
+                // On soustrait l'angle actuel de la carte pour que le bateau pointe au bon endroit
+                const visualAngle = brng - map.getBearing();
+                document.getElementById('boat-img').style.transform = `rotate(${visualAngle}deg)`;
+            }
         }
 
         function formatDist(meters) {
             return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
         }
 
-        // --- POINTS ---
+        // --- POINTS (Fonctions inchangées pour la plupart) ---
         map.on('contextmenu', function(e) {
             if (isBuildingRoute) return; 
             tempLatLng = e.latlng;
@@ -474,8 +483,10 @@
                 routePolyline.setLatLngs([]); 
                 activeDestination = wp;
                 activeRoute = null;
+                isAutoCenter = true;
+                document.getElementById('btn-recenter').style.display = 'none';
                 map.closePopup();
-                map.fitBounds([userMarker.getLatLng(), L.latLng(wp.lat, wp.lng)], {padding: [50, 50]});
+                // On ne fitBounds plus, on laisse le GPS centrer la vue
             }
         }
 
@@ -492,13 +503,16 @@
             }
         }
 
-        // --- ROUTES (TRACES) ---
+        // --- ROUTES ---
         function viewRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
             routePolyline.setLatLngs([]);
             navPolyline.setLatLngs([]);
-            activeDestination = null; // Désactive la navigation
-            
+            activeDestination = null; 
+            activeRoute = null;
+            isAutoCenter = false;
+            document.getElementById('btn-recenter').style.display = 'none';
+
             const rt = routes[index];
             tempViewPolyline = L.polyline(rt.points, {color: '#1976D2', weight: 5}).addTo(map);
             map.fitBounds(tempViewPolyline.getBounds());
@@ -571,9 +585,10 @@
             navPolyline.setLatLngs([]);
             activeRoute = routes[index];
             activeDestination = null;
+            isAutoCenter = true;
+            document.getElementById('btn-recenter').style.display = 'none';
             routePolyline.setLatLngs(activeRoute.points);
-            routePolyline.bringToBack(); // La trace verte passe en arrière-plan pour laisser la trace rouge visible
-            map.fitBounds(routePolyline.getBounds());
+            routePolyline.bringToBack(); 
             closeMenu();
         }
 
@@ -588,7 +603,7 @@
             document.getElementById('navigation-info').style.display = 'none';
             document.getElementById('heading-box').style.display = 'none';
             document.getElementById('btn-recenter').style.display = 'none';
-            map.setBearing(0); // Remet la carte au Nord
+            map.setBearing(0); 
             document.getElementById('boat-img').style.transform = `rotate(0deg)`;
         }
 
