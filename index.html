@@ -732,7 +732,760 @@
         // --- BOUSSOLE PHYSIQUE ---
         function initCompass() {
             const handleOrientation = (event) => {
+                let heading = event.webkitCompassHeading ? event.webkitCompassHeading : (360 - event.alpha);<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Trace Bateau - Lac du Der</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
+    
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
+        
+        /* On cache le bouton de zoom (+/-) et l'ancien bouton natif de rotation */
+        .leaflet-control-zoom, .leaflet-control-rotate { display: none !important; }
+        
+        /* Panneau bas */
+        #panel {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; width: 280px; text-align: center;
+        }
+        #speed-container { display: flex; justify-content: space-around; align-items: center; margin-bottom: 5px; }
+        #speed { font-size: 42px; font-weight: bold; color: #1976D2; }
+        #heading-box { display: none; text-align: left; border-left: 2px solid #eee; padding-left: 15px;}
+        #heading-val { font-size: 28px; font-weight: bold; color: #d32f2f; }
+        
+        #stats { font-size: 14px; color: #666; margin-bottom: 5px; }
+        #navigation-info { font-size: 16px; font-weight: bold; color: #0056b3; margin-bottom: 5px; display: none; background: #e3f2fd; padding: 5px; border-radius: 5px;}
+        
+        button {
+            padding: 10px 15px; border: none; border-radius: 8px; font-size: 16px;
+            font-weight: bold; cursor: pointer; width: 100%; margin-top: 8px;
+        }
+        #btn-record { background: #1976D2; color: white; }
+        #btn-record.recording { background: #d32f2f; }
+        .btn-unit { width: auto; padding: 5px 10px; background: #e0e0e0; font-size: 14px; }
+        .btn-unit.active { background: #1976D2; color: white; }
+        
+        /* Boutons flottants */
+        .fab {
+            position: absolute; z-index: 1000; background: white; border: 2px solid #1976D2;
+            color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
+            padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        /* Style quand le bouton est actif (Mode GPS) */
+        .fab.active-mode { background: #1976D2; color: white; }
+        
+        #btn-menu { top: 15px; left: 15px; }
+        
+        /* DISPOSITION À DROITE */
+        #compass-container {
+            position: absolute; top: 15px; right: 15px; z-index: 1000;
+            width: 60px; height: 60px; background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            display: flex; justify-content: center; align-items: center; border: 2px solid #1976D2;
+        }
+        
+        /* NOUVEAU BOUTON DE ROTATION */
+        #btn-rotate { top: 90px; right: 20px; }
+        
+        #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
+        #btn-download { top: 220px; right: 20px; }
+
+        /* Boussole interne */
+        #compass-degrees {
+            position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
+            font-size: 12px; font-weight: bold; color: #333; background: white;
+            padding: 2px 6px; border-radius: 10px; border: 1px solid #ccc;
+        }
+        .compass-arrow {
+            position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+            width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent;
+            border-top: 12px solid #d32f2f; 
+        }
+        #compass-rose { position: relative; width: 100%; height: 100%; transition: transform 0.1s linear; }
+        #compass-rose span { position: absolute; font-weight: bold; font-size: 12px; color: #333; }
+        .north { top: 4px; left: 50%; transform: translateX(-50%); color: #d32f2f !important; }
+        .south { bottom: 4px; left: 50%; transform: translateX(-50%); }
+        .east { right: 4px; top: 50%; transform: translateY(-50%); }
+        .west { left: 4px; top: 50%; transform: translateY(-50%); }
+        .compass-cross-v { position: absolute; width: 2px; height: 100%; left: 50%; transform: translateX(-50%); background: #ccc; z-index: -1;}
+        .compass-cross-h { position: absolute; height: 2px; width: 100%; top: 50%; transform: translateY(-50%); background: #ccc; z-index: -1;}
+
+        /* Modal Menu */
+        #modal {
+            display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center;
+        }
+        #modal-content {
+            background: white; width: 90%; max-width: 400px; max-height: 80%;
+            border-radius: 15px; padding: 20px; overflow-y: auto;
+        }
+        #modal h3 { margin-top: 0; color: #1976D2; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .list-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 0; border-bottom: 1px solid #eee;
+        }
+        .list-item span { flex: 1; margin-right: 10px; font-size: 14px; }
+        .list-item div { display: flex; gap: 4px; }
+        .list-item button { width: auto; margin: 0; padding: 6px 8px; font-size: 12px; }
+        
+        .btn-danger { background: #d32f2f; color: white; }
+        .btn-follow { background: #4caf50; color: white; }
+        .btn-edit { background: #f39c12; color: white; }
+        .btn-view { background: #1976D2; color: white; }
+        .btn-close { background: #666; color: white; margin-top: 15px; }
+        
+        .leaflet-popup-content { text-align: center; }
+        .leaflet-popup-content button { margin-top: 5px; padding: 5px 10px; font-size: 12px; width: auto; }
+
+        #build-route-panel {
+            display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            background: #f39c12; color: white; padding: 10px; border-radius: 8px; 
+            z-index: 2000; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); width: 80%;
+        }
+        #build-route-panel p { margin: 0 0 10px 0; font-weight: bold; font-size: 14px;}
+        #build-route-panel button { width: auto; display: inline-block; padding: 5px 15px; font-size: 14px; }
+
+        #name-modal {
+            display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6); z-index: 4000; justify-content: center; align-items: center;
+        }
+        #name-modal-content {
+            background: white; width: 80%; max-width: 300px; border-radius: 15px; padding: 20px; text-align: center;
+        }
+        #name-modal-content input {
+            width: 90%; padding: 10px; font-size: 16px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 8px;
+        }
+        #name-modal-content button { margin-top: 5px; }
+
+        .custom-div-icon {
+            font-size: 30px; line-height: 30px; text-align: center;
+            filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
+        }
+
+        /* Icône du bateau */
+        .boat-icon {
+            font-size: 32px; line-height: 32px; text-align: center;
+            filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.6));
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="name-modal">
+        <div id="name-modal-content">
+            <h3 id="modal-title" style="margin-top:0; color:#1976D2;">Nouveau Point</h3>
+            <input type="text" id="new-point-name" placeholder="Nom..." autocomplete="off">
+            <button type="button" class="btn-follow" onclick="confirmNewName()">Enregistrer</button>
+            <button type="button" class="btn-close" onclick="closeNameModal()">Annuler</button>
+        </div>
+    </div>
+
+    <div id="build-route-panel">
+        <p id="build-route-text">Touchez les punaises pour créer votre route</p>
+        <button type="button" onclick="saveBuiltRoute()" style="background:white; color:#f39c12; margin-right:5px;">Enregistrer</button>
+        <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
+    </div>
+
+    <!-- Boutons de gauche -->
+    <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
+
+    <!-- Boutons de droite (bien empilés) -->
+    <div id="compass-container">
+        <div class="compass-arrow"></div>
+        <div id="compass-rose">
+            <div class="compass-cross-v"></div><div class="compass-cross-h"></div>
+            <span class="north">N</span><span class="east">E</span><span class="south">S</span><span class="west">O</span>
+        </div>
+        <div id="compass-degrees">--°</div>
+    </div>
+
+    <!-- LE NOUVEAU BOUTON DE ROTATION -->
+    <button type="button" class="fab" id="btn-rotate" onclick="toggleAutoRotate()">🧭</button>
+    
+    <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
+    <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
+
+    <!-- Panneau bas -->
+    <div id="panel">
+        <div id="navigation-info">Navigation en cours...</div>
+        <div id="speed-container">
+            <div>
+                <div id="speed">0.0</div>
+                <div style="font-size:12px; color:#666; margin-top:-5px;">Vitesse</div>
+            </div>
+            <div id="heading-box">
+                <div id="heading-val">0°</div>
+                <div style="font-size:12px; color:#666; margin-top:-5px;">Cap à suivre</div>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 10px;">
+            <button type="button" class="btn-unit active" id="btn-kmh" onclick="setUnit('kmh')">km/h</button>
+            <button type="button" class="btn-unit" id="btn-knots" onclick="setUnit('knots')">nd</button>
+        </div>
+        
+        <div id="stats">Distance : 0 m</div>
+        <button type="button" id="btn-record" onclick="toggleRecording()">Démarrer l'enregistrement</button>
+    </div>
+
+    <div id="modal">
+        <div id="modal-content">
+            <button type="button" class="btn-follow" style="margin-bottom: 15px; background:#f39c12;" onclick="startRouteBuilding()">
+                📍 Créer une route
+            </button>
+
+            <h3>📍 Mes Points</h3>
+            <div id="poi-list"></div>
+            
+            <h3 style="margin-top: 20px;">🗺️ Mes Traces</h3>
+            <div id="route-list"></div>
+            
+            <button type="button" class="btn-close" onclick="closeMenu()">Fermer</button>
+        </div>
+    </div>
+
+    <script>
+        // --- INITIALISATION DE LA CARTE ---
+        const map = L.map('map', { 
+            rotate: true, 
+            rotateControl: false, // ON DESACTIVE LE BOUTON NATIF MOCHE
+            touchRotate: true,    
+            zoomControl: false    
+        }).setView([48.5850, 4.7500], 14);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        // Calques
+        let waypointLayer = L.layerGroup().addTo(map);
+        let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); 
+        let routePolyline = L.polyline([], {color: '#4caf50', weight: 6, dashArray: '10, 10'}).addTo(map); 
+        let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
+        let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
+        
+        let tempViewPolyline = null;
+        let activeDestination = null; 
+        let activeRoute = null; 
+        
+        // --- VARIABLES POUR LE MODE GPS (Waze) ---
+        let isAutoCenter = true; 
+        // On allume le bouton par défaut au démarrage
+        document.getElementById('btn-rotate').classList.add('active-mode');
+
+        // --- Bateau ---
+        const boatIcon = L.divIcon({
+            className: 'boat-icon',
+            html: '<div id="boat-img" style="transition: transform 0.2s;">⛵</div>',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+        });
+
+        let userMarker = L.marker([48.5850, 4.7500], {icon: boatIcon}).addTo(map);
+        
+        // Variables d'état
+        let isRecording = false;
+        let currentSpeed = 0;
+        let distance = 0;
+        let lastLatLng = null;
+        let currentTrack = [];
+        let useKnots = false;
+        let isFirstFix = true;
+
+        let waypoints = JSON.parse(localStorage.getItem('boatWaypoints')) || [];
+        let routes = JSON.parse(localStorage.getItem('boatTracks')) || [];
+        
+        let isBuildingRoute = false;
+        let routeBuilderPoints = [];
+        let tempLatLng = null; 
+        let editingWaypointId = null; 
+        let editingRouteIndex = null; 
+
+        const customIcon = L.divIcon({
+            className: 'custom-div-icon', html: "📍",
+            iconSize: [30, 42], iconAnchor: [15, 42], popupAnchor: [0, -35]
+        });
+
+        // --- FONCTION DU BOUTON ROTATION ---
+        function toggleAutoRotate() {
+            isAutoCenter = !isAutoCenter;
+            const btn = document.getElementById('btn-rotate');
+            
+            if (isAutoCenter) {
+                btn.classList.add('active-mode');
+            } else {
+                btn.classList.remove('active-mode');
+                map.setBearing(0); // Si on désactive, on remet la carte vers le Nord
+                document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            }
+        }
+
+        // --- DÉTECTION DU DÉPLACEMENT MANUEL ---
+        map.on('dragstart', () => {
+            if(activeDestination || activeRoute) {
+                isAutoCenter = false;
+                document.getElementById('btn-rotate').classList.remove('active-mode');
+            }
+        });
+
+        function saveWaypointsToStorage() {
+            const clean = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
+            localStorage.setItem('boatWaypoints', JSON.stringify(clean));
+        }
+        function saveRoutesToStorage() { localStorage.setItem('boatTracks', JSON.stringify(routes)); }
+
+        // --- CALCUL DU CAP ---
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const rad = Math.PI / 180;
+            const dLon = (lon2 - lon1) * rad;
+            const y = Math.sin(dLon) * Math.cos(lat2 * rad);
+            const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) - Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos(dLon);
+            let brng = Math.atan2(y, x) / rad;
+            return (brng + 360) % 360;
+        }
+
+        // --- GPS ---
+        function startGPS() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const newLatLng = L.latLng(lat, lon);
+                        
+                        currentSpeed = position.coords.speed || 0;
+                        updateSpeedDisplay();
+                        userMarker.setLatLng(newLatLng);
+
+                        if (isFirstFix) { map.setView(newLatLng, 16); isFirstFix = false; }
+
+                        if (isRecording) {
+                            currentPolyline.addLatLng(newLatLng);
+                            currentPolyline.bringToFront(); 
+                            if (lastLatLng) distance += lastLatLng.distanceTo(newLatLng);
+                            lastLatLng = newLatLng;
+                            currentTrack.push([lat, lon]);
+                            updateStats();
+                        }
+                        
+                        updateNavigationDistances(newLatLng);
+                    },
+                    (error) => console.error("Erreur GPS:", error),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                );
+            }
+        }
+
+        // --- NAVIGATION & ROTATION ---
+        function updateNavigationDistances(currentLatLng) {
+            waypoints.forEach(wp => {
+                if(wp.marker) {
+                    const dist = currentLatLng.distanceTo(L.latLng(wp.lat, wp.lng));
+                    wp.marker.setPopupContent(`
+                        <b>${wp.name}</b><br>Distance : ${formatDist(dist)}<br>
+                        <button type="button" class="btn-follow" onclick="navigateToPoint(${wp.id})">Naviguer</button>
+                    `);
+                }
+            });
+
+            const navInfo = document.getElementById('navigation-info');
+            const headingBox = document.getElementById('heading-box');
+            
+            let targetLat = null, targetLng = null;
+
+            if (activeDestination) {
+                targetLat = activeDestination.lat;
+                targetLng = activeDestination.lng;
+                navInfo.style.display = 'block';
+                navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(currentLatLng.distanceTo(L.latLng(targetLat, targetLng)))}`;
+                navPolyline.setLatLngs([currentLatLng, L.latLng(targetLat, targetLng)]);
+            } 
+            else if (activeRoute && activeRoute.points.length > 0) {
+                const endPoint = activeRoute.points[activeRoute.points.length - 1];
+                targetLat = endPoint[0];
+                targetLng = endPoint[1];
+                navInfo.style.display = 'block';
+                navInfo.innerHTML = `Route: ${activeRoute.name}<br>Arrivée: ${formatDist(currentLatLng.distanceTo(L.latLng(targetLat, targetLng)))}`;
+                navPolyline.setLatLngs([]); 
+            } 
+            else {
+                navInfo.style.display = 'none';
+                navPolyline.setLatLngs([]);
+                headingBox.style.display = 'none';
+                return;
+            }
+
+            const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
+            headingBox.style.display = 'block';
+            document.getElementById('heading-val').textContent = Math.round(brng) + '°';
+
+            // --- LE CŒUR DE LA ROTATION GPS ---
+            if (isAutoCenter) {
+                // On centre la carte sur le bateau
+                map.setView(currentLatLng, map.getZoom(), {animate: false});
+                // On force la rotation de la carte
+                map.setBearing(brng, {animate: false});
+                // Le bateau pointe toujours vers le haut de l'écran
+                document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            } else {
+                // Si le mode GPS est désactivé, le bateau tourne sur lui-même
+                const visualAngle = brng - map.getBearing();
+                document.getElementById('boat-img').style.transform = `rotate(${visualAngle}deg)`;
+            }
+        }
+
+        function formatDist(meters) {
+            return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
+        }
+
+        // --- POINTS ---
+        map.on('contextmenu', function(e) {
+            if (isBuildingRoute) return; 
+            tempLatLng = e.latlng;
+            editingWaypointId = null;
+            editingRouteIndex = null;
+            document.getElementById('modal-title').innerText = "Nouveau Point";
+            document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            document.getElementById('name-modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('new-point-name').focus(), 100);
+        });
+
+        function saveCurrentLocationWaypoint() {
+            tempLatLng = userMarker.getLatLng();
+            editingWaypointId = null;
+            editingRouteIndex = null;
+            document.getElementById('modal-title').innerText = "Ma Position";
+            document.getElementById('new-point-name').value = "Ma position";
+            document.getElementById('name-modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('new-point-name').focus(), 100);
+        }
+
+        function editWaypoint(id) {
+            const wp = waypoints.find(w => w.id === id);
+            if (wp) {
+                editingWaypointId = id;
+                editingRouteIndex = null;
+                document.getElementById('modal-title').innerText = "Modifier le point";
+                document.getElementById('new-point-name').value = wp.name;
+                document.getElementById('name-modal').style.display = 'flex';
+                setTimeout(() => document.getElementById('new-point-name').focus(), 100);
+            }
+        }
+
+        function editRouteName(index) {
+            editingRouteIndex = index;
+            editingWaypointId = null;
+            document.getElementById('modal-title').innerText = "Modifier la trace";
+            document.getElementById('new-point-name').value = routes[index].name;
+            document.getElementById('name-modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('new-point-name').focus(), 100);
+        }
+
+        function confirmNewName() {
+            const name = document.getElementById('new-point-name').value;
+            if (name) {
+                if (editingRouteIndex !== null) {
+                    routes[editingRouteIndex].name = name;
+                    saveRoutesToStorage();
+                    if(activeRoute && activeRoute.name !== name) activeRoute.name = name; 
+                } else if (editingWaypointId) {
+                    const wp = waypoints.find(w => w.id === editingWaypointId);
+                    if (wp) {
+                        wp.name = name;
+                        wp.marker.setPopupContent(`<b>${name}</b><br>Distance : ...`);
+                        saveWaypointsToStorage();
+                    }
+                } else if (tempLatLng) {
+                    const wp = { id: Date.now(), name: name, lat: tempLatLng.lat, lng: tempLatLng.lng };
+                    waypoints.push(wp);
+                    saveWaypointsToStorage();
+                    drawWaypoint(wp);
+                }
+            }
+            closeNameModal();
+        }
+
+        function closeNameModal() {
+            document.getElementById('name-modal').style.display = 'none';
+            tempLatLng = null;
+            editingWaypointId = null;
+            editingRouteIndex = null;
+            document.getElementById('new-point-name').blur();
+            if(document.getElementById('modal').style.display === 'flex') renderMenuLists(); 
+        }
+
+        function drawWaypoint(wp) {
+            const marker = L.marker([wp.lat, wp.lng], {icon: customIcon}).addTo(waypointLayer);
+            wp.marker = marker;
+            marker.bindPopup(`<b>${wp.name}</b>`);
+            marker.on('click', () => { if (isBuildingRoute) addPointToRoute(wp); });
+        }
+
+        function navigateToPoint(id) {
+            const wp = waypoints.find(w => w.id === id);
+            if (wp) {
+                if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+                routePolyline.setLatLngs([]); 
+                activeDestination = wp;
+                activeRoute = null;
+                isAutoCenter = true;
+                document.getElementById('btn-rotate').classList.add('active-mode');
+                map.closePopup();
+            }
+        }
+
+        function deleteWaypoint(id) {
+            if(confirm("Supprimer ce point ?")) {
+                waypoints = waypoints.filter(w => w.id !== id);
+                saveWaypointsToStorage();
+                waypointLayer.clearLayers();
+                waypoints.forEach(drawWaypoint);
+                if(activeDestination && activeDestination.id === id) {
+                    activeDestination = null;
+                }
+                closeMenu();
+            }
+        }
+
+        // --- ROUTES ---
+        function viewRoute(index) {
+            if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+            routePolyline.setLatLngs([]);
+            navPolyline.setLatLngs([]);
+            activeDestination = null; 
+            activeRoute = null;
+            isAutoCenter = false;
+            document.getElementById('btn-rotate').classList.remove('active-mode');
+
+            const rt = routes[index];
+            tempViewPolyline = L.polyline(rt.points, {color: '#1976D2', weight: 5}).addTo(map);
+            map.fitBounds(tempViewPolyline.getBounds());
+            closeMenu();
+        }
+
+        function deleteRoute(index) {
+            if(confirm("Supprimer cette trace définitivement ?")) {
+                const routeToDelete = routes[index];
+                routes.splice(index, 1);
+                saveRoutesToStorage();
+                if (activeRoute === routeToDelete) { stopFollowingRoute(); }
+                closeMenu();
+            }
+        }
+
+        function startRouteBuilding() {
+            if (waypoints.length < 1) {
+                alert("Créez d'abord au moins 1 point sur la carte !");
+                return;
+            }
+            isBuildingRoute = true;
+            routeBuilderPoints = [];
+            routeBuilderPolyline.setLatLngs([]);
+            closeMenu();
+
+            const startFromCurrent = confirm("Voulez-vous commencer cette route depuis votre position actuelle ?\n\n(Cliquez sur 'Annuler' pour commencer directement par choisir un point sur la carte)");
+            
+            if (startFromCurrent) {
+                const currentLatLng = userMarker.getLatLng();
+                routeBuilderPolyline.addLatLng(currentLatLng);
+                routeBuilderPoints.push({ lat: currentLatLng.lat, lng: currentLatLng.lng, name: "Départ" });
+                document.getElementById('build-route-text').innerText = "Départ ajouté ! Touchez les punaises suivantes.";
+            } else {
+                document.getElementById('build-route-text').innerText = "Touchez les punaises pour créer votre route";
+            }
+            document.getElementById('build-route-panel').style.display = 'block';
+        }
+
+        function addPointToRoute(wp) {
+            if (routeBuilderPoints.length > 0 && routeBuilderPoints[routeBuilderPoints.length - 1].id === wp.id) return;
+            routeBuilderPoints.push(wp);
+            routeBuilderPolyline.addLatLng(L.latLng(wp.lat, wp.lng));
+        }
+
+        function saveBuiltRoute() {
+            if (routeBuilderPoints.length < 2) {
+                alert("Sélectionnez au moins 2 points pour former une route.");
+                return;
+            }
+            const name = prompt("Nom de cette nouvelle route :", "Itinéraire " + new Date().toLocaleDateString());
+            if (name) {
+                const points = routeBuilderPoints.map(p => [p.lat, p.lng]);
+                routes.push({ name: name, date: new Date().toISOString(), distance: 0, points: points });
+                saveRoutesToStorage();
+                cancelRouteBuilding();
+                alert("Route enregistrée !");
+            }
+        }
+
+        function cancelRouteBuilding() {
+            isBuildingRoute = false;
+            routeBuilderPoints = [];
+            routeBuilderPolyline.setLatLngs([]);
+            document.getElementById('build-route-panel').style.display = 'none';
+        }
+
+        function startFollowingRoute(index) {
+            if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+            navPolyline.setLatLngs([]);
+            activeRoute = routes[index];
+            activeDestination = null;
+            isAutoCenter = true;
+            document.getElementById('btn-rotate').classList.add('active-mode');
+            routePolyline.setLatLngs(activeRoute.points);
+            routePolyline.bringToBack(); 
+            closeMenu();
+        }
+
+        function stopFollowingRoute() {
+            activeRoute = null;
+            activeDestination = null;
+            
+            routePolyline.setLatLngs([]);
+            navPolyline.setLatLngs([]);
+            if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
+            
+            document.getElementById('navigation-info').style.display = 'none';
+            document.getElementById('heading-box').style.display = 'none';
+            map.setBearing(0); 
+            document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+        }
+
+        // --- MENU INTERFACE ---
+        function openMenu() {
+            renderMenuLists();
+            document.getElementById('modal').style.display = 'flex';
+        }
+        function closeMenu() { document.getElementById('modal').style.display = 'none'; }
+
+        function renderMenuLists() {
+            const poiList = document.getElementById('poi-list');
+            poiList.innerHTML = waypoints.length === 0 ? "<p style='font-size:14px;color:#666'>Aucun point enregistré.</p>" : "";
+            waypoints.forEach(wp => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.innerHTML = `
+                    <span>${wp.name}</span>
+                    <div>
+                        <button type="button" class="btn-edit" onclick="editWaypoint(${wp.id})">✏️</button>
+                        <button type="button" class="btn-view" onclick="centerOnPoint(${wp.lat}, ${wp.lng}); closeMenu();">Voir</button>
+                        <button type="button" class="btn-danger" onclick="deleteWaypoint(${wp.id})">X</button>
+                    </div>
+                `;
+                poiList.appendChild(div);
+            });
+
+            const routeList = document.getElementById('route-list');
+            routeList.innerHTML = routes.length === 0 ? "<p style='font-size:14px;color:#666'>Aucune trace enregistrée.</p>" : "";
+            routes.forEach((rt, index) => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.innerHTML = `
+                    <span>${rt.name}</span>
+                    <div>
+                        <button type="button" class="btn-edit" onclick="editRouteName(${index})">✏️</button>
+                        <button type="button" class="btn-view" onclick="viewRoute(${index})">Voir</button>
+                        <button type="button" class="btn-follow" onclick="startFollowingRoute(${index})">Suivre</button>
+                        <button type="button" class="btn-danger" onclick="deleteRoute(${index})">X</button>
+                    </div>
+                `;
+                routeList.appendChild(div);
+            });
+            
+            if(activeRoute || activeDestination) {
+                const stopBtn = document.createElement('button');
+                stopBtn.type = "button";
+                stopBtn.className = 'btn-danger';
+                stopBtn.style.marginTop = '10px';
+                stopBtn.innerText = "Arrêter la navigation";
+                stopBtn.onclick = () => { stopFollowingRoute(); closeMenu(); };
+                routeList.appendChild(stopBtn);
+            }
+        }
+
+        function centerOnPoint(lat, lng) { 
+            map.setBearing(0);
+            map.setView([lat, lng], 16); 
+        }
+
+        // --- ENREGISTREMENT GPS ---
+        function toggleRecording() {
+            const btn = document.getElementById('btn-record');
+            if (!isRecording) {
+                isRecording = true;
+                currentTrack = []; distance = 0; lastLatLng = null;
+                currentPolyline.setLatLngs([]);
+                currentPolyline.bringToFront();
+                updateStats();
+                btn.textContent = "Arrêter l'enregistrement";
+                btn.classList.add('recording');
+            } else {
+                isRecording = false;
+                btn.textContent = "Démarrer l'enregistrement";
+                btn.classList.remove('recording');
+                
+                if (currentTrack.length > 0) {
+                    const name = prompt("Nom de cette trace GPS :", "Sortie du " + new Date().toLocaleDateString());
+                    if (name) {
+                        routes.push({ name: name, date: new Date().toISOString(), distance: distance, points: currentTrack });
+                        saveRoutesToStorage();
+                        alert("Trace sauvegardée !");
+                    }
+                }
+            }
+        }
+
+        function updateSpeedDisplay() {
+            let displaySpeed = currentSpeed * 3.6;
+            if (useKnots) displaySpeed = currentSpeed * 1.94384;
+            document.getElementById('speed').textContent = displaySpeed.toFixed(1);
+        }
+        function setUnit(unit) {
+            useKnots = (unit === 'knots');
+            document.getElementById('btn-kmh').classList.toggle('active', !useKnots);
+            document.getElementById('btn-knots').classList.toggle('active', useKnots);
+            updateSpeedDisplay();
+        }
+        function updateStats() { document.getElementById('stats').textContent = "Distance : " + formatDist(distance); }
+        function downloadMapArea() { alert("Zoomez/dézoomez sur la zone pour la mettre en cache."); }
+
+        // --- BOUSSOLE PHYSIQUE ---
+        function initCompass() {
+            const handleOrientation = (event) => {
                 let heading = event.webkitCompassHeading ? event.webkitCompassHeading : (360 - event.alpha);
+                if (heading !== null && !isNaN(heading)) {
+                    heading = (heading + 360) % 360;
+                    document.getElementById('compass-rose').style.transform = `rotate(${-heading}deg)`;
+                    document.getElementById('compass-degrees').textContent = Math.round(heading) + '°';
+                }
+            };
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                document.body.addEventListener('click', function askPermission() {
+                    DeviceOrientationEvent.requestPermission().then(permissionState => {
+                        if (permissionState === 'granted') window.addEventListener('deviceorientation', handleOrientation, true);
+                    }).catch(console.error);
+                    document.body.removeEventListener('click', askPermission);
+                }, { once: true });
+            } else {
+                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                window.addEventListener('deviceorientation', handleOrientation, true);
+            }
+        }
+
+        // --- DÉMARRAGE ---
+        startGPS();
+        initCompass();
+        waypoints.forEach(drawWaypoint);
+    </script>
+</body>
+</html>
                 if (heading !== null && !isNaN(heading)) {
                     heading = (heading + 360) % 360;
                     document.getElementById('compass-rose').style.transform = `rotate(${-heading}deg)`;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'boattracker-v13';
+const CACHE_NAME = 'boattracker-v13.5';
 const ASSETS = [
   'index.html',
   'manifest.json',
