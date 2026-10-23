@@ -13,9 +13,8 @@
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
         
-        /* --- CORRECTION : On cache TOUS les boutons par défaut de Leaflet --- */
+        /* On cache uniquement les boutons de zoom (+/-) par défaut */
         .leaflet-control-zoom { display: none !important; }
-        .leaflet-control-rotate { display: none !important; } /* Cache le carré sombre */
         
         /* Panneau bas */
         #panel {
@@ -215,10 +214,12 @@
 
     <script>
         // --- INITIALISATION DE LA CARTE ---
+        // LA CORRECTION EST ICI : rotateControl: false empêche la création du bouton noir gênant
         const map = L.map('map', { 
             rotate: true, 
-            touchRotate: false, 
-            zoomControl: false   // On désactive le contrôle de zoom par défaut
+            rotateControl: false, // Cache le bouton natif tout en gardant la fonction rotation
+            touchRotate: true,    // Permet à l'utilisateur de tourner manuellement avec 2 doigts
+            zoomControl: false    
         }).setView([48.5850, 4.7500], 14);
         
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
