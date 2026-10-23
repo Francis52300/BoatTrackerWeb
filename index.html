@@ -20,7 +20,7 @@
         #speed-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         #speed { font-size: 42px; font-weight: bold; color: #1976D2; }
         #stats { font-size: 14px; color: #666; margin-bottom: 5px; }
-        #navigation-info { font-size: 16px; font-weight: bold; color: #d32f2f; margin-bottom: 5px; display: none; }
+        #navigation-info { font-size: 16px; font-weight: bold; color: #0056b3; margin-bottom: 5px; display: none; background: #e3f2fd; padding: 5px; border-radius: 5px;}
         
         button {
             padding: 10px 15px; border: none; border-radius: 8px; font-size: 16px;
@@ -90,7 +90,7 @@
         .leaflet-popup-content { text-align: center; }
         .leaflet-popup-content button { margin-top: 5px; padding: 5px 10px; font-size: 12px; width: auto; }
 
-        /* Bandeau Création de Route */
+        /* Panneau Création de Route */
         #build-route-panel {
             display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
             background: #f39c12; color: white; padding: 10px; border-radius: 8px; 
@@ -98,11 +98,34 @@
         }
         #build-route-panel p { margin: 0 0 10px 0; font-weight: bold; }
         #build-route-panel button { width: auto; display: inline-block; padding: 5px 15px; font-size: 14px; }
+
+        /* NOUVEAU : Fenêtre personnalisée pour nommer un point */
+        #name-modal {
+            display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6); z-index: 3000; justify-content: center; align-items: center;
+        }
+        #name-modal-content {
+            background: white; width: 80%; max-width: 300px; border-radius: 15px; padding: 20px; text-align: center;
+        }
+        #name-modal-content input {
+            width: 90%; padding: 10px; font-size: 16px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 8px;
+        }
+        #name-modal-content button { margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
+
+    <!-- Fenêtre de création de point -->
+    <div id="name-modal">
+        <div id="name-modal-content">
+            <h3 style="margin-top:0; color:#1976D2;">Nouveau Point</h3>
+            <input type="text" id="new-point-name" placeholder="Nom du point..." autocomplete="off">
+            <button class="btn-follow" onclick="confirmNewPoint()">Enregistrer</button>
+            <button class="btn-close" onclick="closeNameModal()">Annuler</button>
+        </div>
+    </div>
 
     <!-- Bandeau mode création de route -->
     <div id="build-route-panel">
@@ -166,7 +189,10 @@
         let waypointLayer = L.layerGroup().addTo(map);
         let currentPolyline = L.polyline([], {color: 'red', weight: 4}).addTo(map);
         let routePolyline = L.polyline([], {color: '#4caf50', weight: 5, dashArray: '10, 10'}).addTo(map);
-        let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); // Ligne orange temporaire
+        let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
+        
+        // NOUVEAU : Ligne de navigation (Bleue, pointillée, de vous vers la destination)
+        let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
 
         // Marqueur de position
         let userMarker = L.circleMarker([48.5850, 4.7500], {
@@ -187,12 +213,13 @@
         let routes = JSON.parse(localStorage.getItem('boatTracks')) || [];
         
         // Navigation active
-        let activeDestination = null; // Point ciblé
-        let activeRoute = null; // Trace suivie
+        let activeDestination = null; 
+        let activeRoute = null; 
 
-        // Mode Création de route
+        // Mode Création de route & Nouveau point
         let isBuildingRoute = false;
         let routeBuilderPoints = [];
+        let tempLatLng = null; // Stocke la position en attente de validation
 
         // --- GESTION DU GPS ---
         function startGPS() {
@@ -229,9 +256,9 @@
             }
         }
 
-        // --- CALCUL DES DISTANCES EN DIRECT ---
+        // --- CALCUL DES DISTANCES ET DESSIN DES LIGNES ---
         function updateNavigationDistances(currentLatLng) {
-            // Mise à jour du texte de distance dans les popups
+            // 1. Mise à jour des popups des points
             waypoints.forEach(wp => {
                 if(wp.marker) {
                     const dist = currentLatLng.distanceTo(L.latLng(wp.lat, wp.lng));
@@ -241,28 +268,34 @@
                         <button class="btn-follow" onclick="navigateToPoint(${wp.id})">Naviguer</button>
                         <button class="btn-danger" onclick="deleteWaypoint(${wp.id})">Suppr</button>
                     `;
-                    // Mise à jour silencieuse pour ne pas fermer la popup
-                    if (wp.marker.getPopup() && wp.marker.isPopupOpen()) {
-                        wp.marker.setPopupContent(popupContent);
-                    } else if (wp.marker.getPopup()) {
-                        wp.marker.setPopupContent(popupContent);
-                    }
+                    wp.marker.setPopupContent(popupContent);
                 }
             });
 
-            // Bandeau de navigation en bas
+            // 2. Mise à jour de la ligne et du texte de navigation
             const navInfo = document.getElementById('navigation-info');
             if (activeDestination) {
-                const dist = currentLatLng.distanceTo(L.latLng(activeDestination.lat, activeDestination.lng));
+                const destLatLng = L.latLng(activeDestination.lat, activeDestination.lng);
+                const dist = currentLatLng.distanceTo(destLatLng);
+                
                 navInfo.style.display = 'block';
                 navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(dist)}`;
-            } else if (activeRoute && activeRoute.points.length > 0) {
+                
+                // --- C'EST ICI QU'ON DESSINE LA LIGNE BLEUE ---
+                navPolyline.setLatLngs([currentLatLng, destLatLng]);
+            } 
+            else if (activeRoute && activeRoute.points.length > 0) {
                 const endPoint = activeRoute.points[activeRoute.points.length - 1];
                 const dist = currentLatLng.distanceTo(L.latLng(endPoint[0], endPoint[1]));
                 navInfo.style.display = 'block';
                 navInfo.innerHTML = `Route: ${activeRoute.name}<br>Arrivée: ${formatDist(dist)}`;
-            } else {
+                
+                // On efface la ligne bleue si on suit une trace GPS
+                navPolyline.setLatLngs([]); 
+            } 
+            else {
                 navInfo.style.display = 'none';
+                navPolyline.setLatLngs([]); // Efface la ligne bleue si pas de destination
             }
         }
 
@@ -270,48 +303,47 @@
             return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
         }
 
-        // --- POINTS DE PASSAGE (WAYPOINTS) ---
+        // --- GESTION DES POINTS DE PASSAGE ---
         
-        // Création par appui long (ou clic droit)
+        // Appui long (ou clic droit sur PC) : Ouvre la fenêtre personnalisée
         map.on('contextmenu', function(e) {
-            if (isBuildingRoute) return; // Désactivé en mode création de route
-            
-            const name = prompt("Nom de ce nouveau point :", "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
-            if (name) {
-                const wp = { id: Date.now(), name: name, lat: e.latlng.lat, lng: e.latlng.lng };
-                waypoints.push(wp);
-                localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
-                drawWaypoint(wp);
-            }
+            if (isBuildingRoute) return; 
+            tempLatLng = e.latlng;
+            document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            document.getElementById('name-modal').style.display = 'flex';
         });
 
-        // Création par le bouton 📍 (position actuelle)
-        function saveCurrentLocationWaypoint() {
-            const latLng = userMarker.getLatLng();
-            const name = prompt("Nom de votre position actuelle :", "Ma position");
-            if (name) {
-                const wp = { id: Date.now(), name: name, lat: latLng.lat, lng: latLng.lng };
+        // Valider le nouveau point
+        function confirmNewPoint() {
+            const name = document.getElementById('new-point-name').value;
+            if (name && tempLatLng) {
+                const wp = { id: Date.now(), name: name, lat: tempLatLng.lat, lng: tempLatLng.lng };
                 waypoints.push(wp);
                 localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
                 drawWaypoint(wp);
             }
+            closeNameModal();
+        }
+
+        function closeNameModal() {
+            document.getElementById('name-modal').style.display = 'none';
+            tempLatLng = null;
+        }
+
+        // Bouton 📍 : Crée un point à la position actuelle
+        function saveCurrentLocationWaypoint() {
+            tempLatLng = userMarker.getLatLng();
+            document.getElementById('new-point-name').value = "Ma position";
+            document.getElementById('name-modal').style.display = 'flex';
         }
 
         function drawWaypoint(wp) {
             const marker = L.marker([wp.lat, wp.lng]).addTo(waypointLayer);
             wp.marker = marker;
-            
-            // Contenu initial (sera mis à jour par le GPS)
             marker.bindPopup(`<b>${wp.name}</b>`);
             
-            // Clic sur la punaise
             marker.on('click', () => {
-                if (isBuildingRoute) {
-                    // Mode construction de route : on ajoute le point à la ligne orange
-                    addPointToRoute(wp);
-                } else {
-                    // Mode normal : on ouvre la popup (comportement par défaut)
-                }
+                if (isBuildingRoute) addPointToRoute(wp);
             });
         }
 
@@ -320,14 +352,13 @@
             if (wp) {
                 activeDestination = wp;
                 activeRoute = null;
-                routePolyline.setLatLngs([]); // Efface la route verte
+                routePolyline.setLatLngs([]); 
                 map.closePopup();
-                alert("Navigation activée vers : " + wp.name);
             }
         }
 
         function deleteWaypoint(id) {
-            if(confirm("Supprimer ce point ? (Il sera aussi retiré des routes potentielles)")) {
+            if(confirm("Supprimer ce point ?")) {
                 waypoints = waypoints.filter(w => w.id !== id);
                 localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
                 waypointLayer.clearLayers();
@@ -351,9 +382,7 @@
         }
 
         function addPointToRoute(wp) {
-            // Éviter d'ajouter 2 fois le même point d'affilée
             if (routeBuilderPoints.length > 0 && routeBuilderPoints[routeBuilderPoints.length - 1].id === wp.id) return;
-            
             routeBuilderPoints.push(wp);
             routeBuilderPolyline.addLatLng(L.latLng(wp.lat, wp.lng));
         }
@@ -363,6 +392,7 @@
                 alert("Sélectionnez au moins 2 points pour former une route.");
                 return;
             }
+            // Utilisation de la modale pour nommer la route (plus fiable)
             const name = prompt("Nom de cette nouvelle route :", "Itinéraire " + new Date().toLocaleDateString());
             if (name) {
                 const points = routeBuilderPoints.map(p => [p.lat, p.lng]);
@@ -387,12 +417,12 @@
             routePolyline.setLatLngs(activeRoute.points);
             map.fitBounds(routePolyline.getBounds());
             closeMenu();
-            alert(`Vous suivez la trace : ${activeRoute.name}.`);
         }
 
         function stopFollowingRoute() {
             activeRoute = null;
             routePolyline.setLatLngs([]);
+            navPolyline.setLatLngs([]);
             document.getElementById('navigation-info').style.display = 'none';
         }
 
@@ -434,12 +464,12 @@
                 routeList.appendChild(div);
             });
             
-            if(activeRoute) {
+            if(activeRoute || activeDestination) {
                 const stopBtn = document.createElement('button');
                 stopBtn.className = 'btn-danger';
                 stopBtn.style.marginTop = '10px';
-                stopBtn.innerText = "Arrêter de suivre la route";
-                stopBtn.onclick = () => { stopFollowingRoute(); closeMenu(); };
+                stopBtn.innerText = "Arrêter la navigation";
+                stopBtn.onclick = () => { stopFollowingRoute(); activeDestination = null; closeMenu(); };
                 routeList.appendChild(stopBtn);
             }
         }
