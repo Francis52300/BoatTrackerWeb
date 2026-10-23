@@ -129,7 +129,6 @@
         <div id="name-modal-content">
             <h3 id="modal-title" style="margin-top:0; color:#1976D2;">Nouveau Point</h3>
             <input type="text" id="new-point-name" placeholder="Nom du point..." autocomplete="off">
-            <!-- Le type="button" est très important pour éviter que le téléphone ne recharge la page -->
             <button type="button" class="btn-follow" onclick="confirmNewPoint()">Enregistrer</button>
             <button type="button" class="btn-close" onclick="closeNameModal()">Annuler</button>
         </div>
@@ -226,7 +225,7 @@
         let isBuildingRoute = false;
         let routeBuilderPoints = [];
         let tempLatLng = null; 
-        let editingWaypointId = null; // NOUVEAU : Permet de savoir si on modifie un point existant
+        let editingWaypointId = null; 
 
         // Icône personnalisée pour garantir l'affichage sur mobile
         const customIcon = L.divIcon({
@@ -236,6 +235,18 @@
             iconAnchor: [15, 42],
             popupAnchor: [0, -35]
         });
+
+        // --- FONCTION DE SAUVEGARDE SÉCURISÉE ---
+        // Empêche l'erreur "cyclic object value" en retirant l'icône de carte des données sauvegardées
+        function saveWaypointsToStorage() {
+            const cleanWaypoints = waypoints.map(wp => ({
+                id: wp.id,
+                name: wp.name,
+                lat: wp.lat,
+                lng: wp.lng
+            }));
+            localStorage.setItem('boatWaypoints', JSON.stringify(cleanWaypoints));
+        }
 
         // --- GESTION DU GPS ---
         function startGPS() {
@@ -320,7 +331,6 @@
             document.getElementById('modal-title').innerText = "Nouveau Point";
             document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             document.getElementById('name-modal').style.display = 'flex';
-            // Petit délai pour que le clavier virtuel ne masque pas le bouton
             setTimeout(() => document.getElementById('new-point-name').focus(), 100);
         });
 
@@ -333,7 +343,6 @@
             setTimeout(() => document.getElementById('new-point-name').focus(), 100);
         }
 
-        // NOUVEAU : Modifier un point existant depuis le menu
         function editWaypoint(id) {
             const wp = waypoints.find(w => w.id === id);
             if (wp) {
@@ -355,13 +364,13 @@
                     if (wp) {
                         wp.name = name;
                         wp.marker.setPopupContent(`<b>${name}</b><br>Distance : ...`);
-                        localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
+                        saveWaypointsToStorage(); // Utilisation de la fonction sécurisée
                     }
                 } else if (tempLatLng) {
                     // C'est une création
                     const wp = { id: Date.now(), name: name, lat: tempLatLng.lat, lng: tempLatLng.lng };
                     waypoints.push(wp);
-                    localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
+                    saveWaypointsToStorage(); // Utilisation de la fonction sécurisée
                     drawWaypoint(wp);
                 }
             }
@@ -372,15 +381,13 @@
             document.getElementById('name-modal').style.display = 'none';
             tempLatLng = null;
             editingWaypointId = null;
-            // Ferme le clavier virtuel
             document.getElementById('new-point-name').blur();
             if(document.getElementById('modal').style.display === 'flex') {
-                renderMenuLists(); // Rafraichit le menu si on a modifié un nom
+                renderMenuLists(); 
             }
         }
 
         function drawWaypoint(wp) {
-            // Utilisation de l'icône personnalisée
             const marker = L.marker([wp.lat, wp.lng], {icon: customIcon}).addTo(waypointLayer);
             wp.marker = marker;
             marker.bindPopup(`<b>${wp.name}</b>`);
@@ -397,7 +404,6 @@
                 activeRoute = null;
                 routePolyline.setLatLngs([]); 
                 map.closePopup();
-                // Centrer légèrement la carte pour voir la ligne de navigation
                 map.fitBounds([userMarker.getLatLng(), L.latLng(wp.lat, wp.lng)], {padding: [50, 50]});
             }
         }
@@ -405,7 +411,7 @@
         function deleteWaypoint(id) {
             if(confirm("Supprimer ce point ?")) {
                 waypoints = waypoints.filter(w => w.id !== id);
-                localStorage.setItem('boatWaypoints', JSON.stringify(waypoints));
+                saveWaypointsToStorage(); // Utilisation de la fonction sécurisée
                 waypointLayer.clearLayers();
                 waypoints.forEach(drawWaypoint);
                 if(activeDestination && activeDestination.id === id) activeDestination = null;
