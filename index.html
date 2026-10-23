@@ -13,8 +13,9 @@
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
         
-        /* --- CORRECTION : On cache les boutons de zoom par défaut de Leaflet --- */
+        /* --- CORRECTION : On cache TOUS les boutons par défaut de Leaflet --- */
         .leaflet-control-zoom { display: none !important; }
+        .leaflet-control-rotate { display: none !important; } /* Cache le carré sombre */
         
         /* Panneau bas */
         #panel {
@@ -39,7 +40,7 @@
         .btn-unit { width: auto; padding: 5px 10px; background: #e0e0e0; font-size: 14px; }
         .btn-unit.active { background: #1976D2; color: white; }
         
-        /* Boutons flottants (alignés à droite) */
+        /* Boutons flottants */
         .fab {
             position: absolute; z-index: 1000; background: white; border: 2px solid #1976D2;
             color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
