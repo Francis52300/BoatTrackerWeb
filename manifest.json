@@ -1,0 +1,15 @@
+{
+  "name": "Boat Tracker",
+  "short_name": "BoatTracker",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1976D2",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1004/1004360.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
