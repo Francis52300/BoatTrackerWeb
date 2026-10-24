@@ -188,9 +188,10 @@
         <button type="button" onclick="cancelDrawZone()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
     
-    <div id="edit-zone-panel" class="top-panel" style="background: #2196f3;">
-        <p>Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
-        <button type="button" onclick="stopEditZoneVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
+    <!-- Panneau d'édition générique (zones et routes) -->
+    <div id="edit-panel" class="top-panel" style="background: #2196f3;">
+        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
+        <button type="button" onclick="stopEditVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
@@ -233,13 +234,13 @@
     <div id="modal">
         <div id="modal-content">
             <button type="button" class="btn-follow" style="margin-bottom: 15px; background:#f39c12;" onclick="startRouteBuilding()">
-                📍 Créer une route
+                📍 Créer une route avec des points
             </button>
 
             <h3>📍 Mes Points</h3>
             <div id="poi-list"></div>
             
-            <h3 style="margin-top: 20px;">🗺️ Mes Traces</h3>
+            <h3 style="margin-top: 20px;">🗺️ Mes Routes</h3>
             <div id="route-list"></div>
 
             <h3 style="margin-top: 20px;">⬡ Mes Zones</h3>
@@ -258,7 +259,6 @@
         const map = L.map('map', { rotate: true, rotateControl: true, touchRotate: true, zoomControl: false }).setView([48.5850, 4.7500], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-        // Calque prioritaire pour les points d'édition, placé juste au-dessus des tracés
         map.createPane('editPane');
         map.getPane('editPane').style.zIndex = 650; 
 
@@ -275,8 +275,12 @@
         let isDrawingZone = false;
         let tempZonePoints = [];
 
+        // Variables d'édition
         let isEditingVertices = false;
+        let editMode = null; // 'zone' ou 'route'
         let currentEditingZone = null;
+        let currentEditingRoute = null;
+        let editingPolyline = null;
 
         let measureLayer = L.layerGroup().addTo(map);
         let measureLine = null;
@@ -288,8 +292,6 @@
         
         let isMeasuring = false;
         let measurePoints = [];
-        
-        // NOUVEAU : Variable pour gérer l'enregistrement de trace
         let isSavingTrack = false;
 
         let lastRenderLatLng = null;
@@ -340,118 +342,157 @@
             iconAnchor: [14, 14]
         });
 
-        // --- ÉDITION DES SOMMETS DE ZONE ---
-        function startEditZoneVertices(id) {
+        // Fonction pour calculer la distance d'une route
+        function getRouteDistance(points) {
+            if (!points || points.length < 2) return 0;
+            let dist = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                dist += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
+            }
+            return dist;
+        }
+
+        // --- ÉDITION (ZONES ET ROUTES) ---
+        function startEditVertices(id, type) {
             if (isMeasuring) toggleMeasure();
             if (isDrawingZone) cancelDrawZone();
             if (isBuildingRoute) cancelRouteBuilding();
-            
-            const zone = zones.find(z => z.id === id);
-            if (!zone) return;
+            if (isEditingVertices) stopEditVertices();
             
             closeMenu();
-            
-            if (zone.visible === false) {
-                zone.visible = true;
-                saveZonesToStorage();
-                zoneLayer.clearLayers();
-                zones.forEach(drawZone);
-            }
-
             isEditingVertices = true;
-            currentEditingZone = zone;
+            editMode = type;
             isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'block';
-            
             map.dragging.disable();
             
-            document.getElementById('edit-zone-panel').style.display = 'block';
-            
-            if (zone.polygon) {
-                zone.polygon.closePopup();
-                zone.polygon.unbindPopup();
-                zone.polygon.unbindTooltip();
-            }
-
+            document.getElementById('edit-panel').style.display = 'block';
             editVertexLayer.clearLayers();
-            
-            zone.points.forEach((point, index) => {
-                const marker = L.marker(point, {
-                    icon: vertexIcon, 
-                    draggable: true,
-                    pane: 'editPane', 
-                    bubblingMouseEvents: false 
-                }).addTo(editVertexLayer);
+
+            if (type === 'zone') {
+                const zone = zones.find(z => z.id === id);
+                if (!zone) return;
+                currentEditingZone = zone;
+                if (zone.visible === false) { zone.visible = true; saveZonesToStorage(); zoneLayer.clearLayers(); zones.forEach(drawZone); }
+                if (zone.polygon) { zone.polygon.closePopup(); zone.polygon.unbindPopup(); zone.polygon.unbindTooltip(); }
                 
-                marker.on('dragend', function(e) {
-                    const newLatLng = e.target.getLatLng();
-                    zone.points[index] = [newLatLng.lat, newLatLng.lng];
-                    if (zone.polygon) zone.polygon.setLatLngs(zone.points);
+                document.getElementById('edit-panel-text').innerText = "Édition de la zone : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
+
+                zone.points.forEach((point, index) => {
+                    const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
+                    marker.on('dragend', function(e) {
+                        const newLatLng = e.target.getLatLng();
+                        zone.points[index] = [newLatLng.lat, newLatLng.lng];
+                        if (zone.polygon) zone.polygon.setLatLngs(zone.points);
+                    });
+                    marker.on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        if (zone.points.length <= 3) return alert("Une zone doit avoir au moins 3 points.");
+                        if (confirm("Supprimer ce point ?")) {
+                            zone.points.splice(index, 1);
+                            if (zone.polygon) zone.polygon.setLatLngs(zone.points);
+                            startEditVertices(id, 'zone'); 
+                        }
+                    });
+                });
+            } 
+            else if (type === 'route') {
+                const route = routes[id];
+                if (!route) return;
+                currentEditingRoute = route;
+                
+                document.getElementById('edit-panel-text').innerText = "Édition de la route : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
+
+                if (editingPolyline) map.removeLayer(editingPolyline);
+                if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
+                routePolyline.setLatLngs([]);
+                navPolyline.setLatLngs([]);
+                
+                editingPolyline = L.polyline(route.points, {color: '#1976D2', weight: 5}).addTo(map);
+
+                route.points.forEach((point, i) => {
+                    const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
+                    marker.on('dragend', function(e) {
+                        const newLatLng = e.target.getLatLng();
+                        route.points[i] = [newLatLng.lat, newLatLng.lng];
+                        editingPolyline.setLatLngs(route.points);
+                        route.distance = getRouteDistance(route.points);
+                    });
+                    marker.on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        if (route.points.length <= 2) return alert("Une route doit avoir au moins 2 points.");
+                        if (confirm("Supprimer ce point ?")) {
+                            route.points.splice(i, 1);
+                            editingPolyline.setLatLngs(route.points);
+                            route.distance = getRouteDistance(route.points);
+                            startEditVertices(id, 'route'); 
+                        }
+                    });
                 });
 
-                marker.on('click', function(e) {
-                    L.DomEvent.stopPropagation(e);
-                    if (zone.points.length <= 3) {
-                        alert("Une zone doit avoir au moins 3 points.");
-                        return;
+                editingPolyline.off('click');
+                editingPolyline.on('click', function(e) {
+                    if (editMode !== 'route' || currentEditingRoute !== route) return;
+                    let closestIndex = -1, minDist = Infinity;
+                    for(let i=0; i<route.points.length-1; i++) {
+                        const p1 = L.latLng(route.points[i]);
+                        const p2 = L.latLng(route.points[i+1]);
+                        const dist = L.LineUtil.pointToSegmentDistance(e.latlng, p1, p2);
+                        if(dist < minDist) { minDist = dist; closestIndex = i; }
                     }
-                    if (confirm("Supprimer ce point ?")) {
-                        zone.points.splice(index, 1);
-                        if (zone.polygon) zone.polygon.setLatLngs(zone.points);
-                        startEditZoneVertices(id); 
+                    if(closestIndex !== -1) {
+                        route.points.splice(closestIndex + 1, 0, [e.latlng.lat, e.latlng.lng]);
+                        editingPolyline.setLatLngs(route.points);
+                        route.distance = getRouteDistance(route.points);
+                        startEditVertices(id, 'route'); 
                     }
                 });
-            });
+            }
         }
 
-        function stopEditZoneVertices() {
+        function stopEditVertices() {
             if (!isEditingVertices) return;
-            
             isEditingVertices = false;
             editVertexLayer.clearLayers();
-            document.getElementById('edit-zone-panel').style.display = 'none';
+            if (editingPolyline) { map.removeLayer(editingPolyline); editingPolyline = null; }
+            document.getElementById('edit-panel').style.display = 'none';
             map.dragging.enable();
             
-            if (currentEditingZone) {
+            if (editMode === 'zone' && currentEditingZone) {
                 saveZonesToStorage();
                 zoneLayer.clearLayers();
                 zones.forEach(drawZone);
-                currentEditingZone = null;
+            } else if (editMode === 'route' && currentEditingRoute) {
+                saveRoutesToStorage();
             }
+            editMode = null;
+            currentEditingZone = null;
+            currentEditingRoute = null;
         }
 
         function handleZonePolygonClick(e, zone) {
-            if (!isEditingVertices || currentEditingZone !== zone) return;
-            
-            let closestIndex = -1;
-            let minDistance = Infinity;
-            const clickPoint = e.latlng;
-            const points = zone.points;
-
-            for (let i = 0; i < points.length; i++) {
-                const p1 = L.latLng(points[i]);
-                const p2 = L.latLng(points[(i + 1) % points.length]);
-                const dist = L.LineUtil.pointToSegmentDistance(clickPoint, p1, p2);
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    closestIndex = i;
-                }
+            if (editMode !== 'zone' || currentEditingZone !== zone) return;
+            let closestIndex = -1, minDistance = Infinity;
+            for (let i = 0; i < zone.points.length; i++) {
+                const p1 = L.latLng(zone.points[i]);
+                const p2 = L.latLng(zone.points[(i + 1) % zone.points.length]);
+                const dist = L.LineUtil.pointToSegmentDistance(e.latlng, p1, p2);
+                if (dist < minDistance) { minDistance = dist; closestIndex = i; }
             }
-
             if (closestIndex !== -1) {
-                zone.points.splice(closestIndex + 1, 0, [clickPoint.lat, clickPoint.lng]);
+                zone.points.splice(closestIndex + 1, 0, [e.latlng.lat, e.latlng.lng]);
                 zone.polygon.setLatLngs(zone.points);
-                startEditZoneVertices(zone.id); 
+                startEditVertices(zone.id, 'zone'); 
             }
         }
 
-        // --- GESTION DES ZONES (DESSIN, COULEUR, TEXTE) ---
+        // --- GESTION DES ZONES (DESSIN) ---
         function toggleDrawZone() {
             isDrawingZone = !isDrawingZone;
             const btn = document.getElementById('btn-draw-zone');
             
             if (isDrawingZone) {
-                if (isEditingVertices) stopEditZoneVertices();
+                if (isEditingVertices) stopEditVertices();
                 if (isMeasuring) toggleMeasure();
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
@@ -465,20 +506,10 @@
         }
 
         function finishZone() {
-            if (tempZonePoints.length < 3) {
-                alert("Il faut au moins 3 points pour former une zone.");
-                return;
-            }
+            if (tempZonePoints.length < 3) return alert("Il faut au moins 3 points pour former une zone.");
             const name = prompt("Nom / Commentaire de cette zone :", "Zone réglementée");
             if (name) {
-                const zone = {
-                    id: Date.now(),
-                    name: name,
-                    visible: true,
-                    showName: true, 
-                    color: '#ff9800', 
-                    points: tempZonePoints.map(p => [p.lat, p.lng])
-                };
+                const zone = { id: Date.now(), name: name, visible: true, showName: true, color: '#ff9800', points: tempZonePoints.map(p => [p.lat, p.lng]) };
                 zones.push(zone);
                 saveZonesToStorage();
                 drawZone(zone);
@@ -496,35 +527,15 @@
 
         function drawZone(zone) {
             if (zone.visible === false) return; 
-
             const zColor = zone.color || '#ff9800';
-            
-            const polygon = L.polygon(zone.points, {
-                color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3
-            }).addTo(zoneLayer);
-
+            const polygon = L.polygon(zone.points, { color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3 }).addTo(zoneLayer);
             zone.polygon = polygon;
 
             if (zone.showName !== false) {
-                polygon.bindTooltip(zone.name, {
-                    permanent: true, 
-                    direction: 'center',
-                    className: 'zone-label',
-                    opacity: 0.9
-                });
+                polygon.bindTooltip(zone.name, { permanent: true, direction: 'center', className: 'zone-label', opacity: 0.9 });
             }
-
-            const popupContent = `
-                <div style="text-align:center;">
-                    <b>${zone.name}</b><br><br>
-                    <button type="button" class="btn-danger" onclick="deleteZone(${zone.id})">Supprimer</button>
-                </div>
-            `;
-            polygon.bindPopup(popupContent);
-            
-            polygon.on('click', function(e) {
-                handleZonePolygonClick(e, zone);
-            });
+            polygon.bindPopup(`<div style="text-align:center;"><b>${zone.name}</b><br><br><button type="button" class="btn-danger" onclick="deleteZone(${zone.id})">Supprimer</button></div>`);
+            polygon.on('click', function(e) { handleZonePolygonClick(e, zone); });
         }
 
         function toggleZoneVisibility(id) {
@@ -562,9 +573,7 @@
 
         function deleteZone(id) {
             if(confirm("Supprimer cette zone ?")) {
-                if (isEditingVertices && currentEditingZone && currentEditingZone.id === id) {
-                    stopEditZoneVertices();
-                }
+                if (editMode === 'zone' && currentEditingZone && currentEditingZone.id === id) stopEditVertices();
                 zones = zones.filter(z => z.id !== id);
                 saveZonesToStorage();
                 zoneLayer.clearLayers();
@@ -575,9 +584,7 @@
         }
 
         function saveZonesToStorage() {
-            const cleanZones = zones.map(z => ({ 
-                id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points 
-            }));
+            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points }));
             localStorage.setItem('boatZones', JSON.stringify(cleanZones));
         }
 
@@ -586,9 +593,7 @@
                 tempZonePoints.push(e.latlng);
                 if (tempZonePolyline) map.removeLayer(tempZonePolyline);
                 tempZonePolyline = L.polyline(tempZonePoints, {color: '#ff9800', dashArray: '5, 5'}).addTo(map);
-                if (tempZonePoints.length > 2) {
-                    tempZonePolyline.addLatLng(tempZonePoints[0]);
-                }
+                if (tempZonePoints.length > 2) tempZonePolyline.addLatLng(tempZonePoints[0]);
             } else if (isMeasuring) {
                 addMeasurePoint(e.latlng);
             }
@@ -600,7 +605,7 @@
             const btn = document.getElementById('btn-measure');
             if (isMeasuring) {
                 if (isDrawingZone) cancelDrawZone();
-                if (isEditingVertices) stopEditZoneVertices();
+                if (isEditingVertices) stopEditVertices();
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
                 btn.classList.add('active-mode');
@@ -619,17 +624,13 @@
         function addMeasurePoint(latlng) {
             if (!isMeasuring) return;
             if (measurePoints.length >= 2) clearMeasure();
-
             measurePoints.push(latlng);
             L.marker(latlng, {icon: measureIcon}).addTo(measureLayer);
-
             if (measurePoints.length === 2) {
-                const p1 = measurePoints[0];
-                const p2 = measurePoints[1];
+                const p1 = measurePoints[0], p2 = measurePoints[1];
                 const dist = p1.distanceTo(p2);
                 measureLine = L.polyline([p1, p2], {color: '#4caf50', weight: 4, dashArray: '5, 5'}).addTo(measureLayer);
-                const midPoint = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
-                L.popup().setLatLng(midPoint).setContent(`<b>Distance</b><br>${formatDist(dist)}`).openOn(map);
+                L.popup().setLatLng(L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2)).setContent(`<b>Distance</b><br>${formatDist(dist)}`).openOn(map);
             } else {
                 L.popup().setLatLng(latlng).setContent("Point de départ.<br>Touchez un 2ème point.").openOn(map);
             }
@@ -638,10 +639,7 @@
         // --- SAUVEGARDE ET RESTAURATION ---
         function exportData() {
             const cleanWaypoints = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
-            const cleanZones = zones.map(z => ({ 
-                id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points 
-            }));
-            
+            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points }));
             const data = { waypoints: cleanWaypoints, routes: routes, zones: cleanZones };
             
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
@@ -656,38 +654,26 @@
         function importData(event) {
             const file = event.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
                     if (data.waypoints && data.routes) {
                         if(confirm("Voulez-vous vraiment écraser vos données actuelles par ce fichier ?")) {
-                            if (isEditingVertices) stopEditZoneVertices();
+                            if (isEditingVertices) stopEditVertices();
                             waypoints = data.waypoints;
                             routes = data.routes;
                             zones = data.zones || [];
-                            
-                            saveWaypointsToStorage();
-                            saveRoutesToStorage();
-                            saveZonesToStorage();
-                            
-                            waypointLayer.clearLayers();
-                            zoneLayer.clearLayers();
-                            
-                            waypoints.forEach(drawWaypoint);
-                            zones.forEach(drawZone);
-                            
-                            closeMenu();
-                            stopFollowingRoute();
+                            saveWaypointsToStorage(); saveRoutesToStorage(); saveZonesToStorage();
+                            waypointLayer.clearLayers(); zoneLayer.clearLayers();
+                            waypoints.forEach(drawWaypoint); zones.forEach(drawZone);
+                            closeMenu(); stopFollowingRoute();
                             alert("Données importées avec succès !");
                         }
                     } else {
                         alert("Format de fichier invalide.");
                     }
-                } catch (err) {
-                    alert("Erreur lors de la lecture du fichier.");
-                }
+                } catch (err) { alert("Erreur lors de la lecture du fichier."); }
             };
             reader.readAsText(file);
             event.target.value = '';
@@ -695,14 +681,13 @@
 
         // --- GPS ET NAVIGATION ---
         function resetMapView() {
-            if (isEditingVertices) stopEditZoneVertices();
+            if (isEditingVertices) stopEditVertices();
             isAutoCenter = true;
             map.setBearing(0); 
             map.setView(userMarker.getLatLng(), map.getZoom(), {animate: true});
             document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             document.getElementById('btn-recenter').style.display = 'none';
-            lastRenderLatLng = null; 
-            lastRenderBearing = null;
+            lastRenderLatLng = null; lastRenderBearing = null;
         }
 
         map.on('dragstart', () => {
@@ -749,7 +734,6 @@
                             currentTrack.push([lat, lon]);
                             updateStats();
                         }
-                        
                         updateNavigationDistances(newLatLng);
                     },
                     (error) => console.error("Erreur GPS:", error),
@@ -762,37 +746,27 @@
             waypoints.forEach(wp => {
                 if(wp.marker) {
                     const dist = currentLatLng.distanceTo(L.latLng(wp.lat, wp.lng));
-                    wp.marker.setPopupContent(`
-                        <b>${wp.name}</b><br>Distance : ${formatDist(dist)}<br>
-                        <button type="button" class="btn-follow" onclick="navigateToPoint(${wp.id})">Naviguer</button>
-                    `);
+                    wp.marker.setPopupContent(`<b>${wp.name}</b><br>Distance : ${formatDist(dist)}<br><button type="button" class="btn-follow" onclick="navigateToPoint(${wp.id})">Naviguer</button>`);
                 }
             });
 
             const navInfo = document.getElementById('navigation-info');
             const headingBox = document.getElementById('heading-box');
-            
             let targetLat = null, targetLng = null;
 
             if (activeDestination) {
-                targetLat = activeDestination.lat;
-                targetLng = activeDestination.lng;
+                targetLat = activeDestination.lat; targetLng = activeDestination.lng;
                 navInfo.style.display = 'block';
                 navInfo.innerHTML = `Cap sur: ${activeDestination.name}<br>Reste: ${formatDist(currentLatLng.distanceTo(L.latLng(targetLat, targetLng)))}`;
                 navPolyline.setLatLngs([currentLatLng, L.latLng(targetLat, targetLng)]);
-            } 
-            else if (activeRoute && activeRoute.points.length > 0) {
+            } else if (activeRoute && activeRoute.points.length > 0) {
                 const endPoint = activeRoute.points[activeRoute.points.length - 1];
-                targetLat = endPoint[0];
-                targetLng = endPoint[1];
+                targetLat = endPoint[0]; targetLng = endPoint[1];
                 navInfo.style.display = 'block';
                 navInfo.innerHTML = `Route: ${activeRoute.name}<br>Arrivée: ${formatDist(currentLatLng.distanceTo(L.latLng(targetLat, targetLng)))}`;
                 navPolyline.setLatLngs([]); 
-            } 
-            else {
-                navInfo.style.display = 'none';
-                navPolyline.setLatLngs([]);
-                headingBox.style.display = 'none';
+            } else {
+                navInfo.style.display = 'none'; navPolyline.setLatLngs([]); headingBox.style.display = 'none';
                 return;
             }
 
@@ -806,19 +780,13 @@
                     const movedDist = currentLatLng.distanceTo(lastRenderLatLng);
                     let angleDiff = Math.abs(brng - lastRenderBearing);
                     angleDiff = Math.min(angleDiff, 360 - angleDiff);
-
-                    if (movedDist < 1.5 && angleDiff < 2) {
-                        shouldUpdate = false;
-                    }
+                    if (movedDist < 1.5 && angleDiff < 2) shouldUpdate = false;
                 }
-
                 if (shouldUpdate) {
                     map.panTo(currentLatLng, {animate: true, duration: 0.5});
                     map.setBearing(brng, {animate: true, duration: 0.5});
                     document.getElementById('boat-img').style.transform = `rotate(0deg)`;
-                    
-                    lastRenderLatLng = currentLatLng;
-                    lastRenderBearing = brng;
+                    lastRenderLatLng = currentLatLng; lastRenderBearing = brng;
                 }
             } else {
                 const visualAngle = brng - map.getBearing();
@@ -829,33 +797,24 @@
         function forceImmediateUpdate() {
             if (!isAutoCenter) return;
             let targetLat = null, targetLng = null;
-            if (activeDestination) {
-                targetLat = activeDestination.lat; targetLng = activeDestination.lng;
-            } else if (activeRoute && activeRoute.points.length > 0) {
+            if (activeDestination) { targetLat = activeDestination.lat; targetLng = activeDestination.lng; } 
+            else if (activeRoute && activeRoute.points.length > 0) {
                 const endPoint = activeRoute.points[activeRoute.points.length - 1];
                 targetLat = endPoint[0]; targetLng = endPoint[1];
             }
             if (targetLat) {
                 const currentLatLng = userMarker.getLatLng();
                 const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
-                map.setBearing(brng, {animate: false});
-                map.setView(currentLatLng, map.getZoom(), {animate: false});
-                lastRenderLatLng = currentLatLng;
-                lastRenderBearing = brng;
+                map.setBearing(brng, {animate: false}); map.setView(currentLatLng, map.getZoom(), {animate: false});
+                lastRenderLatLng = currentLatLng; lastRenderBearing = brng;
             }
         }
 
-        function formatDist(meters) {
-            return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
-        }
+        function formatDist(meters) { return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m"; }
 
         map.on('contextmenu', function(e) {
             if (isBuildingRoute || isMeasuring || isDrawingZone || isEditingVertices) return; 
-            tempLatLng = e.latlng;
-            editingWaypointId = null;
-            editingRouteIndex = null;
-            editingZoneId = null;
-            isSavingTrack = false;
+            tempLatLng = e.latlng; editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Nouveau Point";
             document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             document.getElementById('name-modal').style.display = 'flex';
@@ -864,11 +823,7 @@
 
         function saveCurrentLocationWaypoint() {
             if (isMeasuring || isDrawingZone || isEditingVertices) return;
-            tempLatLng = userMarker.getLatLng();
-            editingWaypointId = null;
-            editingRouteIndex = null;
-            editingZoneId = null;
-            isSavingTrack = false;
+            tempLatLng = userMarker.getLatLng(); editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Ma Position";
             document.getElementById('new-point-name').value = "Ma position";
             document.getElementById('name-modal').style.display = 'flex';
@@ -878,10 +833,7 @@
         function editWaypoint(id) {
             const wp = waypoints.find(w => w.id === id);
             if (wp) {
-                editingWaypointId = id;
-                editingRouteIndex = null;
-                editingZoneId = null;
-                isSavingTrack = false;
+                editingWaypointId = id; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
                 document.getElementById('modal-title').innerText = "Modifier le point";
                 document.getElementById('new-point-name').value = wp.name;
                 document.getElementById('name-modal').style.display = 'flex';
@@ -890,11 +842,8 @@
         }
 
         function editRouteName(index) {
-            editingRouteIndex = index;
-            editingWaypointId = null;
-            editingZoneId = null;
-            isSavingTrack = false;
-            document.getElementById('modal-title').innerText = "Modifier la trace";
+            editingRouteIndex = index; editingWaypointId = null; editingZoneId = null; isSavingTrack = false;
+            document.getElementById('modal-title').innerText = "Modifier la route";
             document.getElementById('new-point-name').value = routes[index].name;
             document.getElementById('name-modal').style.display = 'flex';
             setTimeout(() => document.getElementById('new-point-name').focus(), 100);
@@ -903,10 +852,7 @@
         function editZone(id) {
             const zone = zones.find(z => z.id === id);
             if (zone) {
-                editingZoneId = id;
-                editingWaypointId = null;
-                editingRouteIndex = null;
-                isSavingTrack = false;
+                editingZoneId = id; editingWaypointId = null; editingRouteIndex = null; isSavingTrack = false;
                 document.getElementById('modal-title').innerText = "Modifier la zone";
                 document.getElementById('new-point-name').value = zone.name;
                 document.getElementById('name-modal').style.display = 'flex';
@@ -919,30 +865,19 @@
             if (name) {
                 if (editingZoneId) {
                     const zone = zones.find(z => z.id === editingZoneId);
-                    if (zone) {
-                        zone.name = name;
-                        saveZonesToStorage();
-                        zoneLayer.clearLayers();
-                        zones.forEach(drawZone);
-                    }
+                    if (zone) { zone.name = name; saveZonesToStorage(); zoneLayer.clearLayers(); zones.forEach(drawZone); }
                 } else if (editingRouteIndex !== null) {
                     routes[editingRouteIndex].name = name;
                     saveRoutesToStorage();
                     if(activeRoute && activeRoute.name !== name) activeRoute.name = name; 
                 } else if (editingWaypointId) {
                     const wp = waypoints.find(w => w.id === editingWaypointId);
-                    if (wp) {
-                        wp.name = name;
-                        wp.marker.setPopupContent(`<b>${name}</b><br>Distance : ...`);
-                        saveWaypointsToStorage();
-                    }
+                    if (wp) { wp.name = name; wp.marker.setPopupContent(`<b>${name}</b><br>Distance : ...`); saveWaypointsToStorage(); }
                 } else if (tempLatLng) {
                     const wp = { id: Date.now(), name: name, lat: tempLatLng.lat, lng: tempLatLng.lng };
-                    waypoints.push(wp);
-                    saveWaypointsToStorage();
-                    drawWaypoint(wp);
+                    waypoints.push(wp); saveWaypointsToStorage(); drawWaypoint(wp);
                 } else if (isSavingTrack) {
-                    routes.push({ name: name, date: new Date().toISOString(), distance: distance, points: currentTrack });
+                    routes.push({ name: name, date: new Date().toISOString(), distance: getRouteDistance(currentTrack), points: currentTrack });
                     saveRoutesToStorage();
                 }
             }
@@ -951,11 +886,7 @@
 
         function closeNameModal() {
             document.getElementById('name-modal').style.display = 'none';
-            tempLatLng = null;
-            editingWaypointId = null;
-            editingRouteIndex = null;
-            editingZoneId = null;
-            isSavingTrack = false;
+            tempLatLng = null; editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
             document.getElementById('new-point-name').blur();
             if(document.getElementById('modal').style.display === 'flex') renderMenuLists(); 
         }
@@ -965,12 +896,8 @@
             wp.marker = marker;
             marker.bindPopup(`<b>${wp.name}</b>`);
             marker.on('click', (e) => {
-                if (isMeasuring) {
-                    L.DomEvent.stopPropagation(e); 
-                    addMeasurePoint(L.latLng(wp.lat, wp.lng));
-                } else if (isBuildingRoute) {
-                    addPointToRoute(wp);
-                }
+                if (isMeasuring) { L.DomEvent.stopPropagation(e); addMeasurePoint(L.latLng(wp.lat, wp.lng)); } 
+                else if (isBuildingRoute) { addPointToRoute(wp); }
             });
         }
 
@@ -979,39 +906,26 @@
             if (wp) {
                 if (tempViewPolyline) map.removeLayer(tempViewPolyline);
                 routePolyline.setLatLngs([]); 
-                activeDestination = wp;
-                activeRoute = null;
-                isAutoCenter = true;
-                document.getElementById('btn-recenter').style.display = 'none';
-                map.closePopup();
-                lastRenderLatLng = null; 
-                lastRenderBearing = null;
-                forceImmediateUpdate();
+                activeDestination = wp; activeRoute = null; isAutoCenter = true;
+                document.getElementById('btn-recenter').style.display = 'none'; map.closePopup();
+                lastRenderLatLng = null; lastRenderBearing = null; forceImmediateUpdate();
             }
         }
 
         function deleteWaypoint(id) {
             if(confirm("Supprimer ce point ?")) {
-                waypoints = waypoints.filter(w => w.id !== id);
-                saveWaypointsToStorage();
-                waypointLayer.clearLayers();
-                waypoints.forEach(drawWaypoint);
-                if(activeDestination && activeDestination.id === id) {
-                    activeDestination = null;
-                }
+                waypoints = waypoints.filter(w => w.id !== id); saveWaypointsToStorage();
+                waypointLayer.clearLayers(); waypoints.forEach(drawWaypoint);
+                if(activeDestination && activeDestination.id === id) activeDestination = null;
                 closeMenu();
             }
         }
 
         function viewRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
-            routePolyline.setLatLngs([]);
-            navPolyline.setLatLngs([]);
-            activeDestination = null; 
-            activeRoute = null;
-            isAutoCenter = false;
+            routePolyline.setLatLngs([]); navPolyline.setLatLngs([]);
+            activeDestination = null; activeRoute = null; isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'none';
-
             const rt = routes[index];
             tempViewPolyline = L.polyline(rt.points, {color: '#1976D2', weight: 5}).addTo(map);
             map.fitBounds(tempViewPolyline.getBounds());
@@ -1019,28 +933,19 @@
         }
 
         function deleteRoute(index) {
-            if(confirm("Supprimer cette trace définitivement ?")) {
+            if(confirm("Supprimer cette route définitivement ?")) {
                 const routeToDelete = routes[index];
-                routes.splice(index, 1);
-                saveRoutesToStorage();
+                routes.splice(index, 1); saveRoutesToStorage();
                 if (activeRoute === routeToDelete) { stopFollowingRoute(); }
                 closeMenu();
             }
         }
 
         function startRouteBuilding() {
-            if (waypoints.length < 1) {
-                alert("Créez d'abord au moins 1 point sur la carte !");
-                return;
-            }
-            if (isMeasuring) toggleMeasure();
-            if (isDrawingZone) toggleDrawZone();
-            if (isEditingVertices) stopEditZoneVertices();
+            if (waypoints.length < 1) return alert("Créez d'abord au moins 1 point sur la carte !");
+            if (isMeasuring) toggleMeasure(); if (isDrawingZone) toggleDrawZone(); if (isEditingVertices) stopEditVertices();
             
-            isBuildingRoute = true;
-            routeBuilderPoints = [];
-            routeBuilderPolyline.setLatLngs([]);
-            closeMenu();
+            isBuildingRoute = true; routeBuilderPoints = []; routeBuilderPolyline.setLatLngs([]); closeMenu();
 
             const startFromCurrent = confirm("Voulez-vous commencer cette route depuis votre position actuelle ?\n\n(Cliquez sur 'Annuler' pour commencer directement par choisir un point sur la carte)");
             
@@ -1062,64 +967,41 @@
         }
 
         function saveBuiltRoute() {
-            if (routeBuilderPoints.length < 2) {
-                alert("Sélectionnez au moins 2 points pour former une route.");
-                return;
-            }
+            if (routeBuilderPoints.length < 2) return alert("Sélectionnez au moins 2 points pour former une route.");
             const name = prompt("Nom de cette nouvelle route :", "Itinéraire " + new Date().toLocaleDateString());
             if (name) {
                 const points = routeBuilderPoints.map(p => [p.lat, p.lng]);
-                routes.push({ name: name, date: new Date().toISOString(), distance: 0, points: points });
-                saveRoutesToStorage();
-                cancelRouteBuilding();
-                alert("Route enregistrée !");
+                routes.push({ name: name, date: new Date().toISOString(), distance: getRouteDistance(points), points: points });
+                saveRoutesToStorage(); cancelRouteBuilding(); alert("Route enregistrée !");
             }
         }
 
         function cancelRouteBuilding() {
-            isBuildingRoute = false;
-            routeBuilderPoints = [];
-            routeBuilderPolyline.setLatLngs([]);
+            isBuildingRoute = false; routeBuilderPoints = []; routeBuilderPolyline.setLatLngs([]);
             document.getElementById('build-route-panel').style.display = 'none';
         }
 
         function startFollowingRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
-            if (isMeasuring) toggleMeasure();
-            if (isDrawingZone) toggleDrawZone();
-            if (isEditingVertices) stopEditZoneVertices();
+            if (isMeasuring) toggleMeasure(); if (isDrawingZone) toggleDrawZone(); if (isEditingVertices) stopEditVertices();
 
-            navPolyline.setLatLngs([]);
-            activeRoute = routes[index];
-            activeDestination = null;
-            isAutoCenter = true;
+            navPolyline.setLatLngs([]); activeRoute = routes[index]; activeDestination = null; isAutoCenter = true;
             document.getElementById('btn-recenter').style.display = 'none';
-            routePolyline.setLatLngs(activeRoute.points);
-            routePolyline.bringToBack(); 
-            closeMenu();
-            lastRenderLatLng = null; 
-            lastRenderBearing = null;
-            forceImmediateUpdate();
+            routePolyline.setLatLngs(activeRoute.points); routePolyline.bringToBack(); 
+            closeMenu(); lastRenderLatLng = null; lastRenderBearing = null; forceImmediateUpdate();
         }
 
         function stopFollowingRoute() {
-            activeRoute = null;
-            activeDestination = null;
-            routePolyline.setLatLngs([]);
-            navPolyline.setLatLngs([]);
+            activeRoute = null; activeDestination = null;
+            routePolyline.setLatLngs([]); navPolyline.setLatLngs([]);
             if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
             document.getElementById('navigation-info').style.display = 'none';
             document.getElementById('heading-box').style.display = 'none';
-            map.setBearing(0); 
-            document.getElementById('boat-img').style.transform = `rotate(0deg)`;
-            lastRenderLatLng = null; 
-            lastRenderBearing = null;
+            map.setBearing(0); document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            lastRenderLatLng = null; lastRenderBearing = null;
         }
 
-        function openMenu() {
-            renderMenuLists();
-            document.getElementById('modal').style.display = 'flex';
-        }
+        function openMenu() { renderMenuLists(); document.getElementById('modal').style.display = 'flex'; }
         function closeMenu() { document.getElementById('modal').style.display = 'none'; }
 
         function renderMenuLists() {
@@ -1140,14 +1022,16 @@
             });
 
             const routeList = document.getElementById('route-list');
-            routeList.innerHTML = routes.length === 0 ? "<p style='font-size:14px;color:#666'>Aucune trace enregistrée.</p>" : "";
+            routeList.innerHTML = routes.length === 0 ? "<p style='font-size:14px;color:#666'>Aucune route enregistrée.</p>" : "";
             routes.forEach((rt, index) => {
+                const distStr = formatDist(getRouteDistance(rt.points));
                 const div = document.createElement('div');
                 div.className = 'list-item';
                 div.innerHTML = `
-                    <span>${rt.name}</span>
+                    <span>${rt.name} <br><span style="font-size:12px;color:#666">${distStr}</span></span>
                     <div>
                         <button type="button" class="btn-edit" onclick="editRouteName(${index})">✏️</button>
+                        <button type="button" class="btn-edit" style="background: #2196f3;" onclick="startEditVertices(${index}, 'route')">🔧</button>
                         <button type="button" class="btn-view" onclick="viewRoute(${index})">Voir</button>
                         <button type="button" class="btn-follow" onclick="startFollowingRoute(${index})">Suivre</button>
                         <button type="button" class="btn-danger" onclick="deleteRoute(${index})">X</button>
@@ -1161,7 +1045,6 @@
             zones.forEach(z => {
                 const isVisible = z.visible !== false;
                 const eyeIcon = isVisible ? '👁️' : '🙈';
-                
                 const div = document.createElement('div');
                 div.className = 'list-item';
                 div.innerHTML = `
@@ -1170,7 +1053,7 @@
                         <input type="color" value="${z.color || '#ff9800'}" onchange="changeZoneColor(${z.id}, this.value)" style="width:24px; height:24px; padding:0; border:none; cursor:pointer;">
                         <button type="button" class="btn-view" onclick="toggleZoneVisibility(${z.id})">${eyeIcon}</button>
                         <button type="button" class="btn-view" onclick="toggleZoneName(${z.id})">T</button>
-                        <button type="button" class="btn-edit" style="background: #2196f3;" onclick="startEditZoneVertices(${z.id})">🔧</button>
+                        <button type="button" class="btn-edit" style="background: #2196f3;" onclick="startEditVertices(${z.id}, 'zone')">🔧</button>
                         <button type="button" class="btn-edit" onclick="editZone(${z.id})">✏️</button>
                         <button type="button" class="btn-danger" onclick="deleteZone(${z.id})">X</button>
                     </div>
@@ -1189,29 +1072,19 @@
             }
         }
 
-        function centerOnPoint(lat, lng) { 
-            map.setBearing(0);
-            map.setView([lat, lng], 16); 
-        }
+        function centerOnPoint(lat, lng) { map.setBearing(0); map.setView([lat, lng], 16); }
 
         function toggleRecording() {
             const btn = document.getElementById('btn-record');
             if (!isRecording) {
-                isRecording = true;
-                currentTrack = []; distance = 0; lastLatLng = null;
-                currentPolyline.setLatLngs([]);
-                currentPolyline.bringToFront();
-                updateStats();
-                btn.textContent = "Arrêter l'enregistrement";
-                btn.classList.add('recording');
+                isRecording = true; currentTrack = []; distance = 0; lastLatLng = null;
+                currentPolyline.setLatLngs([]); currentPolyline.bringToFront();
+                updateStats(); btn.textContent = "Arrêter l'enregistrement"; btn.classList.add('recording');
             } else {
-                isRecording = false;
-                btn.textContent = "Démarrer l'enregistrement";
-                btn.classList.remove('recording');
-                
+                isRecording = false; btn.textContent = "Démarrer l'enregistrement"; btn.classList.remove('recording');
                 if (currentTrack.length > 0) {
                     isSavingTrack = true;
-                    document.getElementById('modal-title').innerText = "Nom de la trace";
+                    document.getElementById('modal-title').innerText = "Nom de la route";
                     document.getElementById('new-point-name').value = "Sortie du " + new Date().toLocaleDateString();
                     document.getElementById('name-modal').style.display = 'flex';
                     setTimeout(() => document.getElementById('new-point-name').focus(), 100);
@@ -1255,8 +1128,7 @@
             }
         }
 
-        startGPS();
-        initCompass();
+        startGPS(); initCompass();
         waypoints.forEach(drawWaypoint);
         zones.forEach(drawZone);
     </script>
