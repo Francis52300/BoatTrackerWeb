@@ -11,11 +11,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.min.js"></script>
     
-    <!-- INTÉGRATION DIRECTE DU MODULE DE DÉPLACEMENT POUR ÉVITER LES ERREURS DE CHARGEMENT -->
-    <script>
-        L.PathDraggable=L.Draggable.extend({initialize:function(t){this._path=t,this._canvas=t._map.getRenderer(t)instanceof L.Canvas;var a=this._canvas?this._path._map.getRenderer(this._path)._container:this._path._path;L.Draggable.prototype.initialize.call(this,a,a,!0)},_updatePosition:function(){var t={originalEvent:this._lastEvent};this.fire("drag",t)},_onDown:function(t){var a=t.touches?t.touches[0]:t;this._startPoint=new L.Point(a.clientX,a.clientY),this._canvas&&!this._path._containsPoint(this._path._map.mouseEventToLayerPoint(a))||L.Draggable.prototype._onDown.call(this,t)}}),L.Handler.PathDrag=L.Handler.extend({initialize:function(t){this._path=t},getEvents:function(){return{dragstart:this._onDragStart,drag:this._onDrag,dragend:this._onDragEnd}},addHooks:function(){this._draggable||(this._draggable=new L.PathDraggable(this._path)),this._draggable.on(this.getEvents(),this).enable(),L.DomUtil.addClass(this._draggable._element,"leaflet-path-draggable")},removeHooks:function(){this._draggable.off(this.getEvents(),this).disable(),L.DomUtil.removeClass(this._draggable._element,"leaflet-path-draggable")},moved:function(){return this._draggable&&this._draggable._moved},_onDragStart:function(){this._startPoint=this._draggable._startPoint,this._path.closePopup().fire("movestart").fire("dragstart")},_onDrag:function(t){var a=this._path,n=t.originalEvent.touches&&1===t.originalEvent.touches.length?t.originalEvent.touches[0]:t.originalEvent,i=L.point(n.clientX,n.clientY),e=a._map.layerPointToLatLng(i);this._offset=i.subtract(this._startPoint),this._startPoint=i,this._path.eachLatLng(this.updateLatLng,this),a.redraw(),t.latlng=e,t.offset=this._offset,a.fire("drag",t),t.latlng=this._path.getCenter?this._path.getCenter():this._path.getLatLng(),a.fire("move",t)},_onDragEnd:function(t){this._path._bounds&&this.resetBounds(),this._path.fire("moveend").fire("dragend",t)},latLngToLayerPoint:function(t){return this._path._map.project(L.latLng(t))._subtract(this._path._map.getPixelOrigin())},updateLatLng:function(t){var a=this.latLngToLayerPoint(t);a._add(this._offset);var n=this._path._map.layerPointToLatLng(a);t.lat=n.lat,t.lng=n.lng},resetBounds:function(){this._path._bounds=new L.LatLngBounds,this._path.eachLatLng((function(t){this._bounds.extend(t)}))}}),L.Path.include({eachLatLng:function(t,a){a=a||this;var n=function(i){for(var e=0;e<i.length;e++){var o=i[e];Array.isArray(o)?n(o):t.call(a,o)}};n(this.getLatLngs())}});
-    </script>
-    
     <link rel="manifest" href="manifest.json">
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
@@ -148,11 +143,10 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* Le point blanc pour l'édition - FORCÉ POUR ÊTRE VISIBLE */
-        .vertex-marker {
+        /* Le point blanc pour l'édition - CORRIGÉ */
+        .leaflet-marker-icon.vertex-marker {
             z-index: 9999 !important;
-            background: transparent;
-            touch-action: none; 
+            pointer-events: auto !important;
         }
         
         .zone-label {
@@ -332,12 +326,12 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // Point blanc ultra-visible
+        // Icône Vertex ultra-visible
         const vertexIcon = L.divIcon({
             className: 'vertex-marker',
-            html: '<div style="width: 20px; height: 20px; background-color: white; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.8); box-sizing: border-box;"></div>',
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
+            html: '<div style="width: 22px; height: 22px; background-color: #ffffff; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.8); box-sizing: border-box;"></div>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
         });
 
         // --- ÉDITION DES SOMMETS DE ZONE ---
@@ -366,7 +360,6 @@
             document.getElementById('edit-zone-panel').style.display = 'block';
             
             if (zone.polygon) {
-                zone.polygon.dragging.disable();
                 zone.polygon.closePopup();
                 zone.polygon.unbindPopup();
                 zone.polygon.unbindTooltip();
@@ -374,7 +367,7 @@
 
             editVertexLayer.clearLayers();
             
-            // FORCER LE CALQUE DES POINTS AU PREMIER PLAN
+            // On force le calque au-dessus
             editVertexLayer.bringToFront();
             
             zone.points.forEach((point, index) => {
@@ -404,8 +397,8 @@
                 });
             });
 
-            // Forcer le rafraîchissement de la carte pour faire apparaître les points
-            setTimeout(() => { map.invalidateSize(); }, 100);
+            // Forcer le rafraichissement visuel
+            setTimeout(() => { map.invalidateSize(); }, 50);
         }
 
         function stopEditZoneVertices() {
@@ -420,31 +413,6 @@
                 zoneLayer.clearLayers();
                 zones.forEach(drawZone);
                 currentEditingZone = null;
-            }
-        }
-
-        function handleZonePolygonClick(e, zone) {
-            if (!isEditingVertices || currentEditingZone !== zone) return;
-            
-            let closestIndex = -1;
-            let minDistance = Infinity;
-            const clickPoint = e.latlng;
-            const points = zone.points;
-
-            for (let i = 0; i < points.length; i++) {
-                const p1 = L.latLng(points[i]);
-                const p2 = L.latLng(points[(i + 1) % points.length]);
-                const dist = L.LineUtil.pointToSegmentDistance(clickPoint, p1, p2);
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    closestIndex = i;
-                }
-            }
-
-            if (closestIndex !== -1) {
-                zone.points.splice(closestIndex + 1, 0, [clickPoint.lat, clickPoint.lng]);
-                zone.polygon.setLatLngs(zone.points);
-                startEditZoneVertices(zone.id); 
             }
         }
 
@@ -503,8 +471,8 @@
             const zColor = zone.color || '#ff9800';
             
             const polygon = L.polygon(zone.points, {
-                color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3,
-                draggable: true 
+                color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3
+                // ON A SUPPRIMÉ LE DRAGGABLE ICI
             }).addTo(zoneLayer);
 
             zone.polygon = polygon;
@@ -525,16 +493,6 @@
                 </div>
             `;
             polygon.bindPopup(popupContent);
-
-            polygon.on('dragend', function() {
-                const newPoints = polygon.getLatLngs()[0].map(p => [p.lat, p.lng]);
-                zone.points = newPoints;
-                saveZonesToStorage();
-            });
-
-            polygon.on('click', function(e) {
-                handleZonePolygonClick(e, zone);
-            });
         }
 
         function toggleZoneVisibility(id) {
