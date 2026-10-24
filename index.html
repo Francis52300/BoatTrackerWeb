@@ -45,6 +45,7 @@
             color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
             padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
+        .fab.active-mode { background: #1976D2; color: white; }
         
         #btn-menu { top: 75px; left: 15px; }
         
@@ -57,9 +58,9 @@
         
         #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
         #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
-        #btn-download { top: 220px; right: 20px; }
+        #btn-measure { top: 220px; right: 20px; color: #4caf50; border-color: #4caf50; }
+        #btn-download { top: 285px; right: 20px; }
 
-        /* Boussole interne */
         #compass-degrees {
             position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
             font-size: 12px; font-weight: bold; color: #333; background: white;
@@ -102,6 +103,8 @@
         .btn-view { background: #1976D2; color: white; }
         .btn-close { background: #666; color: white; margin-top: 15px; }
         
+        .btn-data { background: #607d8b; color: white; margin-top: 5px; }
+        
         .leaflet-popup-content { text-align: center; }
         .leaflet-popup-content button { margin-top: 5px; padding: 5px 10px; font-size: 12px; width: auto; }
 
@@ -133,6 +136,11 @@
         .boat-icon {
             font-size: 32px; line-height: 32px; text-align: center;
             filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.6));
+        }
+        
+        .measure-icon {
+            font-size: 20px; line-height: 20px; text-align: center;
+            filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
     </style>
 </head>
@@ -168,6 +176,9 @@
 
     <button type="button" class="fab" id="btn-recenter" onclick="resetMapView()">🎯</button>
     <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
+    <!-- NOUVEAU BOUTON MESURE -->
+    <button type="button" class="fab" id="btn-measure" onclick="toggleMeasure()">📏</button>
+    
     <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
 
     <div id="panel">
@@ -177,7 +188,6 @@
                 <div id="speed">0.0</div>
                 <div style="font-size:12px; color:#666; margin-top:-5px;">Vitesse</div>
             </div>
-            <!-- CHANGEMENT ICI : Le libellé est plus clair -->
             <div id="heading-box">
                 <div id="heading-val">0°</div>
                 <div style="font-size:12px; color:#666; margin-top:-5px;">Cap cible (GPS)</div>
@@ -205,6 +215,12 @@
             <h3 style="margin-top: 20px;">🗺️ Mes Traces</h3>
             <div id="route-list"></div>
             
+            <!-- NOUVEAUX BOUTONS DE SAUVEGARDE -->
+            <h3 style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;">💾 Sauvegarde</h3>
+            <button type="button" class="btn-data" onclick="exportData()">Exporter mes données (Fichier)</button>
+            <button type="button" class="btn-data" onclick="document.getElementById('import-file').click()">Importer un fichier</button>
+            <input type="file" id="import-file" accept=".json" style="display:none;" onchange="importData(event)">
+            
             <button type="button" class="btn-close" onclick="closeMenu()">Fermer</button>
         </div>
     </div>
@@ -219,10 +235,18 @@
         let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
         
+        // Calques pour la mesure
+        let measureLayer = L.layerGroup().addTo(map);
+        let measureLine = null;
+        
         let tempViewPolyline = null;
         let activeDestination = null; 
         let activeRoute = null; 
         let isAutoCenter = true; 
+        
+        // Variables de mesure
+        let isMeasuring = false;
+        let measurePoints = [];
 
         let lastRenderLatLng = null;
         let lastRenderBearing = null;
@@ -257,7 +281,125 @@
             className: 'custom-div-icon', html: "📍",
             iconSize: [30, 42], iconAnchor: [15, 42], popupAnchor: [0, -35]
         });
+        
+        const measureIcon = L.divIcon({
+            className: 'measure-icon', html: "🔴",
+            iconSize: [20, 20], iconAnchor: [10, 10]
+        });
 
+        // --- OUTIL DE MESURE ---
+        function toggleMeasure() {
+            isMeasuring = !isMeasuring;
+            const btn = document.getElementById('btn-measure');
+            
+            // On désactive le centrage auto pour pouvoir cliquer librement sur la carte
+            if (isMeasuring) {
+                isAutoCenter = false;
+                document.getElementById('btn-recenter').style.display = 'block';
+                btn.classList.add('active-mode');
+            } else {
+                btn.classList.remove('active-mode');
+                clearMeasure();
+            }
+        }
+
+        function clearMeasure() {
+            measurePoints = [];
+            measureLayer.clearLayers();
+            measureLine = null;
+        }
+
+        function addMeasurePoint(latlng) {
+            if (!isMeasuring) return;
+            
+            // Si on a déjà 2 points, on efface et on recommence
+            if (measurePoints.length >= 2) clearMeasure();
+
+            measurePoints.push(latlng);
+            L.marker(latlng, {icon: measureIcon}).addTo(measureLayer);
+
+            if (measurePoints.length === 2) {
+                const p1 = measurePoints[0];
+                const p2 = measurePoints[1];
+                const dist = p1.distanceTo(p2);
+                
+                measureLine = L.polyline([p1, p2], {color: '#4caf50', weight: 4, dashArray: '5, 5'}).addTo(measureLayer);
+                const midPoint = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
+                
+                L.popup()
+                    .setLatLng(midPoint)
+                    .setContent(`<b>Distance</b><br>${formatDist(dist)}`)
+                    .openOn(map);
+            } else {
+                L.popup()
+                    .setLatLng(latlng)
+                    .setContent("Point de départ.<br>Touchez un 2ème point.")
+                    .openOn(map);
+            }
+        }
+
+        // Clic sur la carte pour mesurer
+        map.on('click', function(e) {
+            if (isMeasuring) addMeasurePoint(e.latlng);
+        });
+
+        // --- SAUVEGARDE ET RESTAURATION ---
+        function exportData() {
+            // On retire l'objet "marker" des points pour éviter l'erreur JSON circulaire
+            const cleanWaypoints = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
+            const data = {
+                waypoints: cleanWaypoints,
+                routes: routes
+            };
+            
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "trace_bateau_sauvegarde.json");
+            document.body.appendChild(downloadAnchorNode); // requis pour Firefox
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (data.waypoints && data.routes) {
+                        if(confirm("Voulez-vous vraiment écraser vos données actuelles par ce fichier ?")) {
+                            waypoints = data.waypoints;
+                            routes = data.routes;
+                            
+                            saveWaypointsToStorage();
+                            saveRoutesToStorage();
+                            
+                            // Nettoyage et redessin
+                            waypointLayer.clearLayers();
+                            waypoints.forEach(drawWaypoint);
+                            
+                            // Réinitialiser l'interface
+                            closeMenu();
+                            stopFollowingRoute();
+                            alert("Données importées avec succès !");
+                        }
+                    } else {
+                        alert("Format de fichier invalide.");
+                    }
+                } catch (err) {
+                    alert("Erreur lors de la lecture du fichier.");
+                }
+            };
+            reader.readAsText(file);
+            // Reset l'input pour pouvoir réimporter le même fichier
+            event.target.value = '';
+        }
+
+        // --- GPS ET NAVIGATION (Inchangé) ---
         function resetMapView() {
             isAutoCenter = true;
             map.setBearing(0); 
@@ -413,7 +555,7 @@
         }
 
         map.on('contextmenu', function(e) {
-            if (isBuildingRoute) return; 
+            if (isBuildingRoute || isMeasuring) return; 
             tempLatLng = e.latlng;
             editingWaypointId = null;
             editingRouteIndex = null;
@@ -424,6 +566,7 @@
         });
 
         function saveCurrentLocationWaypoint() {
+            if (isMeasuring) return;
             tempLatLng = userMarker.getLatLng();
             editingWaypointId = null;
             editingRouteIndex = null;
@@ -491,7 +634,16 @@
             const marker = L.marker([wp.lat, wp.lng], {icon: customIcon}).addTo(waypointLayer);
             wp.marker = marker;
             marker.bindPopup(`<b>${wp.name}</b>`);
-            marker.on('click', () => { if (isBuildingRoute) addPointToRoute(wp); });
+            
+            // Modification du clic sur les punaises pour gérer le mode mesure
+            marker.on('click', (e) => {
+                if (isMeasuring) {
+                    L.DomEvent.stopPropagation(e); // Empêche le clic de la carte en dessous
+                    addMeasurePoint(L.latLng(wp.lat, wp.lng));
+                } else if (isBuildingRoute) {
+                    addPointToRoute(wp);
+                }
+            });
         }
 
         function navigateToPoint(id) {
@@ -553,6 +705,8 @@
                 alert("Créez d'abord au moins 1 point sur la carte !");
                 return;
             }
+            if (isMeasuring) toggleMeasure(); // Désactive la mesure
+            
             isBuildingRoute = true;
             routeBuilderPoints = [];
             routeBuilderPolyline.setLatLngs([]);
@@ -601,6 +755,8 @@
 
         function startFollowingRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
+            if (isMeasuring) toggleMeasure(); // Désactive la mesure
+
             navPolyline.setLatLngs([]);
             activeRoute = routes[index];
             activeDestination = null;
