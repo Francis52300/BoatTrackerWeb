@@ -16,10 +16,8 @@
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
         
-        /* On cache UNIQUEMENT le zoom +/- */
         .leaflet-control-zoom { display: none !important; }
         
-        /* Panneau bas */
         #panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 15px;
@@ -42,17 +40,14 @@
         .btn-unit { width: auto; padding: 5px 10px; background: #e0e0e0; font-size: 14px; }
         .btn-unit.active { background: #1976D2; color: white; }
         
-        /* Boutons flottants */
         .fab {
             position: absolute; z-index: 1000; background: white; border: 2px solid #1976D2;
             color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
             padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         
-        /* CORRECTION ICI : On descend le bouton menu à 75px pour laisser la place au bouton de rotation */
         #btn-menu { top: 75px; left: 15px; }
         
-        /* DISPOSITION À DROITE */
         #compass-container {
             position: absolute; top: 15px; right: 15px; z-index: 1000;
             width: 60px; height: 60px; background: rgba(255, 255, 255, 0.9);
@@ -60,12 +55,10 @@
             display: flex; justify-content: center; align-items: center; border: 2px solid #1976D2;
         }
         
-        /* On décale le bouton recentrer 🎯 un peu plus bas */
         #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
         #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
         #btn-download { top: 220px; right: 20px; }
 
-        /* Boussole interne */
         #compass-degrees {
             position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
             font-size: 12px; font-weight: bold; color: #333; background: white;
@@ -85,7 +78,6 @@
         .compass-cross-v { position: absolute; width: 2px; height: 100%; left: 50%; transform: translateX(-50%); background: #ccc; z-index: -1;}
         .compass-cross-h { position: absolute; height: 2px; width: 100%; top: 50%; transform: translateY(-50%); background: #ccc; z-index: -1;}
 
-        /* Modal Menu */
         #modal {
             display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center;
@@ -137,7 +129,6 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* Icône du bateau */
         .boat-icon {
             font-size: 32px; line-height: 32px; text-align: center;
             filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.6));
@@ -163,10 +154,8 @@
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
 
-    <!-- Boutons de gauche (décalés vers le bas) -->
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
 
-    <!-- Boutons de droite (bien empilés) -->
     <div id="compass-container">
         <div class="compass-arrow"></div>
         <div id="compass-rose">
@@ -180,7 +169,6 @@
     <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
     <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
 
-    <!-- Panneau bas -->
     <div id="panel">
         <div id="navigation-info">Navigation en cours...</div>
         <div id="speed-container">
@@ -220,17 +208,9 @@
     </div>
 
     <script>
-        // --- INITIALISATION DE LA CARTE ---
-        const map = L.map('map', { 
-            rotate: true, 
-            rotateControl: true, 
-            touchRotate: true,    
-            zoomControl: false    
-        }).setView([48.5850, 4.7500], 14);
-        
+        const map = L.map('map', { rotate: true, rotateControl: true, touchRotate: true, zoomControl: false }).setView([48.5850, 4.7500], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-        // Calques
         let waypointLayer = L.layerGroup().addTo(map);
         let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); 
         let routePolyline = L.polyline([], {color: '#4caf50', weight: 6, dashArray: '10, 10'}).addTo(map); 
@@ -240,10 +220,12 @@
         let tempViewPolyline = null;
         let activeDestination = null; 
         let activeRoute = null; 
-        
         let isAutoCenter = true; 
 
-        // --- Bateau ---
+        // --- VARIABLES POUR LISSER L'AFFICHAGE ---
+        let lastRenderLatLng = null;
+        let lastRenderBearing = null;
+
         const boatIcon = L.divIcon({
             className: 'boat-icon',
             html: '<div id="boat-img" style="transition: transform 0.2s;">⛵</div>',
@@ -275,16 +257,16 @@
             iconSize: [30, 42], iconAnchor: [15, 42], popupAnchor: [0, -35]
         });
 
-        // --- FONCTION DE CENTRAGE MANUEL ---
         function resetMapView() {
             isAutoCenter = true;
             map.setBearing(0); 
             map.setView(userMarker.getLatLng(), map.getZoom(), {animate: true});
             document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             document.getElementById('btn-recenter').style.display = 'none';
+            lastRenderLatLng = null; 
+            lastRenderBearing = null;
         }
 
-        // --- DÉTECTION DU DÉPLACEMENT MANUEL ---
         map.on('dragstart', () => {
             if(activeDestination || activeRoute) {
                 isAutoCenter = false;
@@ -298,7 +280,6 @@
         }
         function saveRoutesToStorage() { localStorage.setItem('boatTracks', JSON.stringify(routes)); }
 
-        // --- CALCUL DU CAP ---
         function calculateBearing(lat1, lon1, lat2, lon2) {
             const rad = Math.PI / 180;
             const dLon = (lon2 - lon1) * rad;
@@ -308,7 +289,6 @@
             return (brng + 360) % 360;
         }
 
-        // --- GPS ---
         function startGPS() {
             if ("geolocation" in navigator) {
                 navigator.geolocation.watchPosition(
@@ -340,7 +320,6 @@
             }
         }
 
-        // --- NAVIGATION & ROTATION ---
         function updateNavigationDistances(currentLatLng) {
             waypoints.forEach(wp => {
                 if(wp.marker) {
@@ -383,18 +362,36 @@
             headingBox.style.display = 'block';
             document.getElementById('heading-val').textContent = Math.round(brng) + '°';
 
-            // --- ROTATION AUTOMATIQUE ---
+            // --- AMÉLIORATION DE LA FLUIDITÉ ICI ---
             if (isAutoCenter) {
-                map.setBearing(brng);
-                map.setView(currentLatLng, map.getZoom(), {animate: false});
-                document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+                // On ne met à jour que si on a bougé de 1,5m ou tourné de 2° (évite le tremblement à l'arrêt)
+                let shouldUpdate = true;
+                if (lastRenderLatLng && lastRenderBearing !== null) {
+                    const movedDist = currentLatLng.distanceTo(lastRenderLatLng);
+                    let angleDiff = Math.abs(brng - lastRenderBearing);
+                    angleDiff = Math.min(angleDiff, 360 - angleDiff); // Le plus court chemin
+
+                    if (movedDist < 1.5 && angleDiff < 2) {
+                        shouldUpdate = false; // On ignore la mise à jour
+                    }
+                }
+
+                if (shouldUpdate) {
+                    // Animations fluides au lieu de sauts brusques
+                    map.panTo(currentLatLng, {animate: true, duration: 0.5});
+                    map.setBearing(brng, {animate: true, duration: 0.5});
+                    document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+                    
+                    // On mémorise l'état pour la prochaine comparaison
+                    lastRenderLatLng = currentLatLng;
+                    lastRenderBearing = brng;
+                }
             } else {
                 const visualAngle = brng - map.getBearing();
                 document.getElementById('boat-img').style.transform = `rotate(${visualAngle}deg)`;
             }
         }
 
-        // --- FONCTION POUR FORCER L'ACTIVATION IMMÉDIATE ---
         function forceImmediateUpdate() {
             if (!isAutoCenter) return;
             let targetLat = null, targetLng = null;
@@ -407,8 +404,10 @@
             if (targetLat) {
                 const currentLatLng = userMarker.getLatLng();
                 const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
-                map.setBearing(brng);
+                map.setBearing(brng, {animate: false});
                 map.setView(currentLatLng, map.getZoom(), {animate: false});
+                lastRenderLatLng = currentLatLng;
+                lastRenderBearing = brng;
             }
         }
 
@@ -416,7 +415,6 @@
             return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m";
         }
 
-        // --- POINTS ---
         map.on('contextmenu', function(e) {
             if (isBuildingRoute) return; 
             tempLatLng = e.latlng;
@@ -509,6 +507,8 @@
                 isAutoCenter = true;
                 document.getElementById('btn-recenter').style.display = 'none';
                 map.closePopup();
+                lastRenderLatLng = null; 
+                lastRenderBearing = null;
                 forceImmediateUpdate();
             }
         }
@@ -526,7 +526,6 @@
             }
         }
 
-        // --- ROUTES ---
         function viewRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
             routePolyline.setLatLngs([]);
@@ -613,24 +612,25 @@
             routePolyline.setLatLngs(activeRoute.points);
             routePolyline.bringToBack(); 
             closeMenu();
+            lastRenderLatLng = null; 
+            lastRenderBearing = null;
             forceImmediateUpdate();
         }
 
         function stopFollowingRoute() {
             activeRoute = null;
             activeDestination = null;
-            
             routePolyline.setLatLngs([]);
             navPolyline.setLatLngs([]);
             if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
-            
             document.getElementById('navigation-info').style.display = 'none';
             document.getElementById('heading-box').style.display = 'none';
             map.setBearing(0); 
             document.getElementById('boat-img').style.transform = `rotate(0deg)`;
+            lastRenderLatLng = null; 
+            lastRenderBearing = null;
         }
 
-        // --- MENU INTERFACE ---
         function openMenu() {
             renderMenuLists();
             document.getElementById('modal').style.display = 'flex';
@@ -687,7 +687,6 @@
             map.setView([lat, lng], 16); 
         }
 
-        // --- ENREGISTREMENT GPS ---
         function toggleRecording() {
             const btn = document.getElementById('btn-record');
             if (!isRecording) {
@@ -728,7 +727,6 @@
         function updateStats() { document.getElementById('stats').textContent = "Distance : " + formatDist(distance); }
         function downloadMapArea() { alert("Zoomez/dézoomez sur la zone pour la mettre en cache."); }
 
-        // --- BOUSSOLE PHYSIQUE ---
         function initCompass() {
             const handleOrientation = (event) => {
                 let heading = event.webkitCompassHeading ? event.webkitCompassHeading : (360 - event.alpha);
@@ -751,7 +749,6 @@
             }
         }
 
-        // --- DÉMARRAGE ---
         startGPS();
         initCompass();
         waypoints.forEach(drawWaypoint);
