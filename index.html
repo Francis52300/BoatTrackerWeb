@@ -49,7 +49,8 @@
             padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         
-        #btn-menu { top: 15px; left: 15px; }
+        /* CORRECTION ICI : On descend le bouton menu à 75px pour laisser la place au bouton de rotation */
+        #btn-menu { top: 75px; left: 15px; }
         
         /* DISPOSITION À DROITE */
         #compass-container {
@@ -162,7 +163,7 @@
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
 
-    <!-- Boutons de gauche (Le menu, et le fameux bouton de rotation natif juste en dessous) -->
+    <!-- Boutons de gauche (décalés vers le bas) -->
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
 
     <!-- Boutons de droite (bien empilés) -->
@@ -222,7 +223,7 @@
         // --- INITIALISATION DE LA CARTE ---
         const map = L.map('map', { 
             rotate: true, 
-            rotateControl: true,  // On l'active
+            rotateControl: true, 
             touchRotate: true,    
             zoomControl: false    
         }).setView([48.5850, 4.7500], 14);
@@ -384,8 +385,6 @@
 
             // --- ROTATION AUTOMATIQUE ---
             if (isAutoCenter) {
-                // On applique la rotation PUIS on centre la carte.
-                // C'est la seule façon fiable de faire tourner la carte avec cette bibliothèque.
                 map.setBearing(brng);
                 map.setView(currentLatLng, map.getZoom(), {animate: false});
                 document.getElementById('boat-img').style.transform = `rotate(0deg)`;
@@ -510,7 +509,6 @@
                 isAutoCenter = true;
                 document.getElementById('btn-recenter').style.display = 'none';
                 map.closePopup();
-                // Forcer la rotation immédiatement
                 forceImmediateUpdate();
             }
         }
@@ -615,7 +613,6 @@
             routePolyline.setLatLngs(activeRoute.points);
             routePolyline.bringToBack(); 
             closeMenu();
-            // Forcer la rotation immédiatement
             forceImmediateUpdate();
         }
 
