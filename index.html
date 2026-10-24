@@ -96,7 +96,7 @@
             padding: 10px 0; border-bottom: 1px solid #eee;
         }
         .list-item span { flex: 1; margin-right: 10px; font-size: 14px; }
-        .list-item div { display: flex; gap: 4px; }
+        .list-item div { display: flex; gap: 2px; align-items:center; }
         .list-item button { width: auto; margin: 0; padding: 6px 8px; font-size: 12px; }
         
         .btn-danger { background: #d32f2f; color: white; }
@@ -109,7 +109,6 @@
         .leaflet-popup-content { text-align: center; }
         .leaflet-popup-content button { margin-top: 5px; padding: 5px 10px; font-size: 12px; width: auto; }
 
-        /* PANNEAUX HAUT */
         .top-panel {
             display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
             background: #ff9800; color: white; padding: 10px; border-radius: 8px; 
@@ -145,12 +144,24 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* NOUVEAU : Icône pour les sommets de zone */
-        .vertex-icon {
-            font-size: 16px; line-height: 16px; text-align: center;
-            background: white; border: 2px solid #ff9800; border-radius: 50%;
-            width: 16px; height: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        /* Icône du sommet (Point blanc) garantie visible */
+        .vertex-marker {
+            background: transparent;
         }
+        
+        /* Style du nom affiché sur la carte */
+        .zone-label {
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid #ccc;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            font-weight: bold;
+            font-size: 12px;
+            color: #333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            pointer-events: none; /* Ne bloque pas les clics sur la carte */
+        }
+        .zone-label::before { display: none; } /* Enlève la flèche du tooltip */
     </style>
 </head>
 <body>
@@ -178,7 +189,6 @@
         <button type="button" onclick="cancelDrawZone()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
     
-    <!-- NOUVEAU PANNEAU EDITION DE ZONE -->
     <div id="edit-zone-panel" class="top-panel" style="background: #2196f3;">
         <p>Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
         <button type="button" onclick="stopEditZoneVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
@@ -262,7 +272,6 @@
         let isDrawingZone = false;
         let tempZonePoints = [];
 
-        // Variables pour l'édition des sommets
         let isEditingVertices = false;
         let currentEditingZone = null;
 
@@ -318,9 +327,12 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
+        // CORRECTION : Ajout d'un HTML explicite pour que le point soit bien visible
         const vertexIcon = L.divIcon({
-            className: 'vertex-icon',
-            iconSize: [20, 20], iconAnchor: [10, 10]
+            className: 'vertex-marker',
+            html: '<div style="width: 18px; height: 18px; background: white; border: 3px solid #ff9800; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,0.6);"></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
         });
 
         // --- ÉDITION DES SOMMETS DE ZONE ---
@@ -334,7 +346,6 @@
             
             closeMenu();
             
-            // S'assurer que la zone est visible
             if (zone.visible === false) {
                 zone.visible = true;
                 saveZonesToStorage();
@@ -349,26 +360,23 @@
             
             document.getElementById('edit-zone-panel').style.display = 'block';
             
-            // Désactiver le déplacement global et les popups de la zone
             if (zone.polygon) {
                 zone.polygon.dragging.disable();
                 zone.polygon.closePopup();
                 zone.polygon.unbindPopup();
+                zone.polygon.unbindTooltip(); // On cache le texte pendant l'édition
             }
 
-            // Créer un marqueur pour chaque sommet
             editVertexLayer.clearLayers();
             zone.points.forEach((point, index) => {
                 const marker = L.marker(point, {icon: vertexIcon, draggable: true}).addTo(editVertexLayer);
                 
-                // Mise à jour lors du glissement
                 marker.on('dragend', function(e) {
                     const newLatLng = e.target.getLatLng();
                     zone.points[index] = [newLatLng.lat, newLatLng.lng];
                     if (zone.polygon) zone.polygon.setLatLngs(zone.points);
                 });
 
-                // Clic sur un sommet pour le supprimer
                 marker.on('click', function(e) {
                     L.DomEvent.stopPropagation(e);
                     if (zone.points.length <= 3) {
@@ -378,7 +386,7 @@
                     if (confirm("Supprimer ce point ?")) {
                         zone.points.splice(index, 1);
                         if (zone.polygon) zone.polygon.setLatLngs(zone.points);
-                        startEditZoneVertices(id); // Relance l'édition pour rafraîchir l'interface
+                        startEditZoneVertices(id); 
                     }
                 });
             });
@@ -399,11 +407,9 @@
             }
         }
 
-        // Clic sur le polygone pour ajouter un point en mode édition
         function handleZonePolygonClick(e, zone) {
             if (!isEditingVertices || currentEditingZone !== zone) return;
             
-            // Trouver le segment le plus proche
             let closestIndex = -1;
             let minDistance = Infinity;
             const clickPoint = e.latlng;
@@ -420,14 +426,13 @@
             }
 
             if (closestIndex !== -1) {
-                // Insérer le nouveau point après closestIndex
                 zone.points.splice(closestIndex + 1, 0, [clickPoint.lat, clickPoint.lng]);
                 zone.polygon.setLatLngs(zone.points);
-                startEditZoneVertices(zone.id); // Rafraîchir les sommets
+                startEditZoneVertices(zone.id); 
             }
         }
 
-        // --- GESTION DES ZONES (DESSIN ET VISIBILITÉ) ---
+        // --- GESTION DES ZONES (DESSIN, COULEUR, TEXTE) ---
         function toggleDrawZone() {
             isDrawingZone = !isDrawingZone;
             const btn = document.getElementById('btn-draw-zone');
@@ -457,6 +462,8 @@
                     id: Date.now(),
                     name: name,
                     visible: true,
+                    showName: true, // Nouvelle option activée par défaut
+                    color: '#ff9800', // Couleur par défaut
                     points: tempZonePoints.map(p => [p.lat, p.lng])
                 };
                 zones.push(zone);
@@ -475,14 +482,26 @@
         }
 
         function drawZone(zone) {
-            if (zone.visible === false) return; // Ne pas dessiner si masqué
+            if (zone.visible === false) return; 
 
+            const zColor = zone.color || '#ff9800';
+            
             const polygon = L.polygon(zone.points, {
-                color: '#ff9800', weight: 3, fillColor: '#ff9800', fillOpacity: 0.3,
+                color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3,
                 draggable: true 
             }).addTo(zoneLayer);
 
             zone.polygon = polygon;
+
+            // Affichage du nom sur la carte (si activé)
+            if (zone.showName !== false) {
+                polygon.bindTooltip(zone.name, {
+                    permanent: true, 
+                    direction: 'center',
+                    className: 'zone-label',
+                    opacity: 0.9
+                });
+            }
 
             const popupContent = `
                 <div style="text-align:center;">
@@ -498,7 +517,6 @@
                 saveZonesToStorage();
             });
 
-            // Ajout de point en mode édition
             polygon.on('click', function(e) {
                 handleZonePolygonClick(e, zone);
             });
@@ -507,7 +525,29 @@
         function toggleZoneVisibility(id) {
             const zone = zones.find(z => z.id === id);
             if (zone) {
-                zone.visible = !(zone.visible !== false); // Inverse l'état (true par défaut)
+                zone.visible = !(zone.visible !== false); 
+                saveZonesToStorage();
+                zoneLayer.clearLayers();
+                zones.forEach(drawZone);
+                renderMenuLists();
+            }
+        }
+
+        function toggleZoneName(id) {
+            const zone = zones.find(z => z.id === id);
+            if (zone) {
+                zone.showName = !(zone.showName !== false); 
+                saveZonesToStorage();
+                zoneLayer.clearLayers();
+                zones.forEach(drawZone);
+                renderMenuLists();
+            }
+        }
+
+        function changeZoneColor(id, newColor) {
+            const zone = zones.find(z => z.id === id);
+            if (zone) {
+                zone.color = newColor;
                 saveZonesToStorage();
                 zoneLayer.clearLayers();
                 zones.forEach(drawZone);
@@ -530,7 +570,14 @@
         }
 
         function saveZonesToStorage() {
-            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, visible: z.visible, points: z.points }));
+            const cleanZones = zones.map(z => ({ 
+                id: z.id, 
+                name: z.name, 
+                visible: z.visible, 
+                showName: z.showName,
+                color: z.color,
+                points: z.points 
+            }));
             localStorage.setItem('boatZones', JSON.stringify(cleanZones));
         }
 
@@ -591,13 +638,11 @@
         // --- SAUVEGARDE ET RESTAURATION ---
         function exportData() {
             const cleanWaypoints = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
-            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, visible: z.visible, points: z.points }));
+            const cleanZones = zones.map(z => ({ 
+                id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points 
+            }));
             
-            const data = {
-                waypoints: cleanWaypoints,
-                routes: routes,
-                zones: cleanZones
-            };
+            const data = { waypoints: cleanWaypoints, routes: routes, zones: cleanZones };
             
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
             const downloadAnchorNode = document.createElement('a');
@@ -1107,12 +1152,15 @@
             zones.forEach(z => {
                 const isVisible = z.visible !== false;
                 const eyeIcon = isVisible ? '👁️' : '🙈';
+                
                 const div = document.createElement('div');
                 div.className = 'list-item';
                 div.innerHTML = `
-                    <span>${z.name}</span>
+                    <span style="color:${z.color || '#ff9800'}; font-weight:bold;">${z.name}</span>
                     <div>
+                        <input type="color" value="${z.color || '#ff9800'}" onchange="changeZoneColor(${z.id}, this.value)" style="width:24px; height:24px; padding:0; border:none; cursor:pointer;">
                         <button type="button" class="btn-view" onclick="toggleZoneVisibility(${z.id})">${eyeIcon}</button>
+                        <button type="button" class="btn-view" onclick="toggleZoneName(${z.id})">T</button>
                         <button type="button" class="btn-edit" style="background: #2196f3;" onclick="startEditZoneVertices(${z.id})">🔧</button>
                         <button type="button" class="btn-edit" onclick="editZone(${z.id})">✏️</button>
                         <button type="button" class="btn-danger" onclick="deleteZone(${z.id})">X</button>
