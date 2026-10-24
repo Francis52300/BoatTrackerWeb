@@ -10,7 +10,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.min.js"></script>
-    <script src="https://unpkg.com/leaflet-path-drag@2.0.0/dist/L.Path.Drag.min.js"></script>
+    <!-- CORRECTION 1 : Lien CDN valide pour le module de déplacement -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.path.drag@0.0.6/src/Path.Drag.min.js"></script>
     
     <link rel="manifest" href="manifest.json">
     <style>
@@ -148,7 +149,7 @@
         .vertex-marker {
             z-index: 9999 !important;
             background: transparent;
-            touch-action: none; /* Empêche le défilement de la page pendant le drag */
+            touch-action: none; 
         }
         
         .zone-label {
@@ -267,7 +268,6 @@
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
         
         let zoneLayer = L.layerGroup().addTo(map);
-        // Calque des points d'édition ajouté en dernier pour être au-dessus
         let editVertexLayer = L.layerGroup().addTo(map);
         
         let tempZonePolyline = null;
@@ -329,7 +329,7 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // CORRECTION DEFINITIVE : Point avec fond blanc, bordure bleue, taille 24px
+        // Point blanc ultra-visible
         const vertexIcon = L.divIcon({
             className: 'vertex-marker',
             html: '<div style="width: 20px; height: 20px; background-color: white; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.8); box-sizing: border-box;"></div>',
@@ -366,15 +366,15 @@
                 zone.polygon.dragging.disable();
                 zone.polygon.closePopup();
                 zone.polygon.unbindPopup();
-                zone.polygon.unbindTooltip(); // On cache le texte pendant l'édition
+                zone.polygon.unbindTooltip();
             }
 
             editVertexLayer.clearLayers();
-            // On s'assure que le calque des points est au-dessus de tout
-            editVertexLayer.bringToFront(); 
+            
+            // FORCER LE CALQUE DES POINTS AU PREMIER PLAN
+            editVertexLayer.bringToFront();
             
             zone.points.forEach((point, index) => {
-                // zIndexOffset pour s'assurer que le marqueur est au-dessus du polygone
                 const marker = L.marker(point, {
                     icon: vertexIcon, 
                     draggable: true,
@@ -736,6 +736,7 @@
             return (brng + 360) % 360;
         }
 
+        // CORRECTION 2 : Timeout GPS augmenté
         function startGPS() {
             if ("geolocation" in navigator) {
                 navigator.geolocation.watchPosition(
@@ -762,7 +763,7 @@
                         updateNavigationDistances(newLatLng);
                     },
                     (error) => console.error("Erreur GPS:", error),
-                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
                 );
             }
         }
