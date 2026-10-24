@@ -188,7 +188,7 @@
     </div>
     
     <div id="edit-panel" class="top-panel" style="background: #2196f3;">
-        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
+        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne (surbrillance bleue) pour ajouter un point.</p>
         <button type="button" onclick="stopEditVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
@@ -278,7 +278,7 @@
         let currentEditingZone = null;
         let currentEditingRoute = null;
         let editingPolyline = null;
-        let editHitBox = null; // NOUVEAU : Zone de clic invisible
+        let editHitBox = null; 
 
         let measureLayer = L.layerGroup().addTo(map);
         let measureLine = null;
@@ -361,6 +361,8 @@
             editMode = type;
             isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'block';
+            
+            // On désactive le déplacement de la carte pour éviter les conflits tactiles
             map.dragging.disable();
             
             document.getElementById('edit-panel').style.display = 'block';
@@ -373,11 +375,10 @@
                 if (zone.visible === false) { zone.visible = true; saveZonesToStorage(); zoneLayer.clearLayers(); zones.forEach(drawZone); }
                 if (zone.polygon) { zone.polygon.closePopup(); zone.polygon.unbindPopup(); zone.polygon.unbindTooltip(); }
                 
-                document.getElementById('edit-panel-text').innerText = "Édition de la zone : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
-
-                // Hitbox pour la zone
+                // Hitbox invisible mais interactive (opacité 0.01 pour forcer le navigateur à l'activer)
                 if (editHitBox) map.removeLayer(editHitBox);
-                editHitBox = L.polygon(zone.points, {color: 'rgba(0,0,0,0)', weight: 30, fillOpacity: 0, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                editHitBox = L.polygon(zone.points, {color: 'rgba(255,255,255,0.01)', weight: 40, fillOpacity: 0.01, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                editHitBox.bringToFront();
                 editHitBox.on('click', function(e) { handleZonePolygonClick(e, zone); });
 
                 zone.points.forEach((point, index) => {
@@ -386,7 +387,7 @@
                         const newLatLng = e.target.getLatLng();
                         zone.points[index] = [newLatLng.lat, newLatLng.lng];
                         if (zone.polygon) zone.polygon.setLatLngs(zone.points);
-                        if (editHitBox) editHitBox.setLatLngs(zone.points); // Maj Hitbox
+                        if (editHitBox) editHitBox.setLatLngs(zone.points);
                     });
                     marker.on('click', function(e) {
                         L.DomEvent.stopPropagation(e);
@@ -404,18 +405,18 @@
                 if (!route) return;
                 currentEditingRoute = route;
                 
-                document.getElementById('edit-panel-text').innerText = "Édition de la route : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
-
                 if (editingPolyline) map.removeLayer(editingPolyline);
-                if (editHitBox) map.removeLayer(editHitBox); // Nettoie la Hitbox précédente
+                if (editHitBox) map.removeLayer(editHitBox); 
                 if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
                 routePolyline.setLatLngs([]);
                 navPolyline.setLatLngs([]);
                 
+                // La ligne visible
                 editingPolyline = L.polyline(route.points, {color: '#1976D2', weight: 5}).addTo(map);
 
-                // Hitbox pour la route
-                editHitBox = L.polyline(route.points, {color: 'rgba(0,0,0,0)', weight: 30, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                // Hitbox pour la route (épaisse, transparente, interactive)
+                editHitBox = L.polyline(route.points, {color: 'rgba(255,255,255,0.01)', weight: 40, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                editHitBox.bringToFront();
                 editHitBox.on('click', function(e) {
                     if (editMode !== 'route' || currentEditingRoute !== route) return;
                     let closestIndex = -1, minDist = Infinity;
@@ -440,7 +441,7 @@
                         route.points[i] = [newLatLng.lat, newLatLng.lng];
                         editingPolyline.setLatLngs(route.points);
                         route.distance = getRouteDistance(route.points);
-                        if (editHitBox) editHitBox.setLatLngs(route.points); // Maj Hitbox
+                        if (editHitBox) editHitBox.setLatLngs(route.points); 
                     });
                     marker.on('click', function(e) {
                         L.DomEvent.stopPropagation(e);
@@ -461,7 +462,7 @@
             isEditingVertices = false;
             editVertexLayer.clearLayers();
             if (editingPolyline) { map.removeLayer(editingPolyline); editingPolyline = null; }
-            if (editHitBox) { map.removeLayer(editHitBox); editHitBox = null; } // Nettoyage Hitbox
+            if (editHitBox) { map.removeLayer(editHitBox); editHitBox = null; } 
             document.getElementById('edit-panel').style.display = 'none';
             map.dragging.enable();
             
