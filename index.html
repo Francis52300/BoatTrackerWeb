@@ -9,7 +9,6 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- On garde la version stable -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.min.js"></script>
     
     <link rel="manifest" href="manifest.json">
@@ -17,36 +16,9 @@
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
         
-        /* On cache uniquement le zoom +/- */
+        /* On cache UNIQUEMENT le zoom +/- */
         .leaflet-control-zoom { display: none !important; }
         
-        /* --- LE BOUTON DE ROTATION NATIF EST RESTAURÉ ET STYLISÉ --- */
-        .leaflet-control-rotate {
-            position: absolute !important;
-            top: 85px !important; /* Placé juste en dessous de la boussole */
-            right: 20px !important;
-            margin: 0 !important;
-            background: white !important;
-            border: 2px solid #1976D2 !important;
-            border-radius: 50% !important;
-            width: 50px !important;
-            height: 50px !important;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-            z-index: 1000 !important;
-        }
-        .leaflet-control-rotate a {
-            width: 100% !important;
-            height: 100% !important;
-            font-size: 20px !important;
-            line-height: 46px !important;
-            color: #1976D2 !important;
-            text-align: center !important;
-            text-decoration: none !important;
-        }
-
         /* Panneau bas */
         #panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -76,7 +48,6 @@
             color: #1976D2; border-radius: 50%; width: 50px; height: 50px; font-size: 24px;
             padding: 0; line-height: 46px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
-        .fab.active-mode { background: #1976D2; color: white; }
         
         #btn-menu { top: 15px; left: 15px; }
         
@@ -88,10 +59,10 @@
             display: flex; justify-content: center; align-items: center; border: 2px solid #1976D2;
         }
         
-        /* Les autres boutons sont décalés vers le bas */
-        #btn-recenter { display: none; top: 150px; right: 20px; color: #1976D2; }
-        #btn-save-poi { top: 215px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
-        #btn-download { top: 280px; right: 20px; }
+        /* On décale le bouton recentrer 🎯 un peu plus bas */
+        #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
+        #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
+        #btn-download { top: 220px; right: 20px; }
 
         /* Boussole interne */
         #compass-degrees {
@@ -191,7 +162,7 @@
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
 
-    <!-- Boutons de gauche -->
+    <!-- Boutons de gauche (Le menu, et le fameux bouton de rotation natif juste en dessous) -->
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
 
     <!-- Boutons de droite (bien empilés) -->
@@ -204,8 +175,6 @@
         <div id="compass-degrees">--°</div>
     </div>
 
-    <!-- LE BOUTON NATIF EST GÉRÉ PAR LEAFLET-ROTATE, ON N'A PAS BESOIN DU NOTRE -->
-    
     <button type="button" class="fab" id="btn-recenter" onclick="resetMapView()">🎯</button>
     <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
     <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
@@ -251,10 +220,9 @@
 
     <script>
         // --- INITIALISATION DE LA CARTE ---
-        // On remet rotateControl à true pour que Leaflet gère l'initialisation de la rotation
         const map = L.map('map', { 
             rotate: true, 
-            rotateControl: true, 
+            rotateControl: true,  // On l'active
             touchRotate: true,    
             zoomControl: false    
         }).setView([48.5850, 4.7500], 14);
@@ -306,7 +274,7 @@
             iconSize: [30, 42], iconAnchor: [15, 42], popupAnchor: [0, -35]
         });
 
-        // --- FONCTION DE CENTRAGE MANUEL (bouton 🎯) ---
+        // --- FONCTION DE CENTRAGE MANUEL ---
         function resetMapView() {
             isAutoCenter = true;
             map.setBearing(0); 
@@ -416,14 +384,32 @@
 
             // --- ROTATION AUTOMATIQUE ---
             if (isAutoCenter) {
-                // On utilise setView qui replace le bateau au centre.
-                // On force la rotation en modifiant l'angle.
+                // On applique la rotation PUIS on centre la carte.
+                // C'est la seule façon fiable de faire tourner la carte avec cette bibliothèque.
+                map.setBearing(brng);
                 map.setView(currentLatLng, map.getZoom(), {animate: false});
-                map.setBearing(brng, {animate: false}); // L'appel direct fonctionne car le bouton natif initialise la rotation
                 document.getElementById('boat-img').style.transform = `rotate(0deg)`;
             } else {
                 const visualAngle = brng - map.getBearing();
                 document.getElementById('boat-img').style.transform = `rotate(${visualAngle}deg)`;
+            }
+        }
+
+        // --- FONCTION POUR FORCER L'ACTIVATION IMMÉDIATE ---
+        function forceImmediateUpdate() {
+            if (!isAutoCenter) return;
+            let targetLat = null, targetLng = null;
+            if (activeDestination) {
+                targetLat = activeDestination.lat; targetLng = activeDestination.lng;
+            } else if (activeRoute && activeRoute.points.length > 0) {
+                const endPoint = activeRoute.points[activeRoute.points.length - 1];
+                targetLat = endPoint[0]; targetLng = endPoint[1];
+            }
+            if (targetLat) {
+                const currentLatLng = userMarker.getLatLng();
+                const brng = calculateBearing(currentLatLng.lat, currentLatLng.lng, targetLat, targetLng);
+                map.setBearing(brng);
+                map.setView(currentLatLng, map.getZoom(), {animate: false});
             }
         }
 
@@ -524,6 +510,8 @@
                 isAutoCenter = true;
                 document.getElementById('btn-recenter').style.display = 'none';
                 map.closePopup();
+                // Forcer la rotation immédiatement
+                forceImmediateUpdate();
             }
         }
 
@@ -627,6 +615,8 @@
             routePolyline.setLatLngs(activeRoute.points);
             routePolyline.bringToBack(); 
             closeMenu();
+            // Forcer la rotation immédiatement
+            forceImmediateUpdate();
         }
 
         function stopFollowingRoute() {
