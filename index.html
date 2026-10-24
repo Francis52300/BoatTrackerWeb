@@ -188,7 +188,7 @@
     </div>
     
     <div id="edit-panel" class="top-panel" style="background: #2196f3;">
-        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Faites un appui long sur la ligne pour ajouter un point.</p>
+        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. <b>Touchez la ligne pour ajouter un point.</b></p>
         <button type="button" onclick="stopEditVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
@@ -278,7 +278,6 @@
         let currentEditingZone = null;
         let currentEditingRoute = null;
         let editingPolyline = null;
-        let editHitBox = null; 
 
         let measureLayer = L.layerGroup().addTo(map);
         let measureLine = null;
@@ -376,16 +375,6 @@
                 currentEditingZone = zone;
                 if (zone.visible === false) { zone.visible = true; saveZonesToStorage(); zoneLayer.clearLayers(); zones.forEach(drawZone); }
                 if (zone.polygon) { zone.polygon.closePopup(); zone.polygon.unbindPopup(); zone.polygon.unbindTooltip(); }
-                
-                // Hitbox invisible mais interactive
-                if (editHitBox) map.removeLayer(editHitBox);
-                editHitBox = L.polygon(zone.points, {color: 'rgba(255,255,255,0.01)', weight: 40, fillOpacity: 0.01, interactive: true, bubblingMouseEvents: false}).addTo(map);
-                editHitBox.bringToFront();
-                // CLIC ou APPUI LONG (contextmenu)
-                editHitBox.on('click contextmenu', function(e) { 
-                    L.DomEvent.stopPropagation(e); 
-                    handleZonePolygonClick(e, zone); 
-                });
 
                 zone.points.forEach((point, index) => {
                     const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
@@ -393,7 +382,6 @@
                         const newLatLng = e.target.getLatLng();
                         zone.points[index] = [newLatLng.lat, newLatLng.lng];
                         if (zone.polygon) zone.polygon.setLatLngs(zone.points);
-                        if (editHitBox) editHitBox.setLatLngs(zone.points);
                     });
                     marker.on('click', function(e) {
                         L.DomEvent.stopPropagation(e);
@@ -412,33 +400,11 @@
                 currentEditingRoute = route;
                 
                 if (editingPolyline) map.removeLayer(editingPolyline);
-                if (editHitBox) map.removeLayer(editHitBox); 
                 if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
                 routePolyline.setLatLngs([]);
                 navPolyline.setLatLngs([]);
                 
                 editingPolyline = L.polyline(route.points, {color: '#1976D2', weight: 5}).addTo(map);
-
-                editHitBox = L.polyline(route.points, {color: 'rgba(255,255,255,0.01)', weight: 40, interactive: true, bubblingMouseEvents: false}).addTo(map);
-                editHitBox.bringToFront();
-                // CLIC ou APPUI LONG (contextmenu)
-                editHitBox.on('click contextmenu', function(e) {
-                    L.DomEvent.stopPropagation(e);
-                    if (editMode !== 'route' || currentEditingRoute !== route) return;
-                    let closestIndex = -1, minDist = Infinity;
-                    for(let i=0; i<route.points.length-1; i++) {
-                        const p1 = L.latLng(route.points[i]);
-                        const p2 = L.latLng(route.points[i+1]);
-                        const dist = L.LineUtil.pointToSegmentDistance(e.latlng, p1, p2);
-                        if(dist < minDist) { minDist = dist; closestIndex = i; }
-                    }
-                    if(closestIndex !== -1) {
-                        route.points.splice(closestIndex + 1, 0, [e.latlng.lat, e.latlng.lng]);
-                        editingPolyline.setLatLngs(route.points);
-                        route.distance = getRouteDistance(route.points);
-                        startEditVertices(id, 'route'); 
-                    }
-                });
 
                 route.points.forEach((point, i) => {
                     const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
@@ -447,7 +413,6 @@
                         route.points[i] = [newLatLng.lat, newLatLng.lng];
                         editingPolyline.setLatLngs(route.points);
                         route.distance = getRouteDistance(route.points);
-                        if (editHitBox) editHitBox.setLatLngs(route.points); 
                     });
                     marker.on('click', function(e) {
                         L.DomEvent.stopPropagation(e);
@@ -468,7 +433,6 @@
             isEditingVertices = false;
             editVertexLayer.clearLayers();
             if (editingPolyline) { map.removeLayer(editingPolyline); editingPolyline = null; }
-            if (editHitBox) { map.removeLayer(editHitBox); editHitBox = null; } 
             document.getElementById('edit-panel').style.display = 'none';
             
             // On réactive le déplacement et la rotation de la carte
@@ -488,19 +452,65 @@
             currentEditingRoute = null;
         }
 
-        function handleZonePolygonClick(e, zone) {
-            if (editMode !== 'zone' || currentEditingZone !== zone) return;
-            let closestIndex = -1, minDistance = Infinity;
-            for (let i = 0; i < zone.points.length; i++) {
-                const p1 = L.latLng(zone.points[i]);
-                const p2 = L.latLng(zone.points[(i + 1) % zone.points.length]);
-                const dist = L.LineUtil.pointToSegmentDistance(e.latlng, p1, p2);
-                if (dist < minDistance) { minDistance = dist; closestIndex = i; }
+        // NOUVEAU : Détection mathématique du clic pour ajouter un point
+        function handleEditMapClick(e) {
+            if (!isEditingVertices) return;
+
+            const clickPt = map.latLngToContainerPoint(e.latlng);
+
+            if (editMode === 'route' && currentEditingRoute) {
+                let closestIndex = -1;
+                let minDistance = Infinity;
+                const pts = currentEditingRoute.points;
+
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const p1 = map.latLngToContainerPoint(L.latLng(pts[i]));
+                    const p2 = map.latLngToContainerPoint(L.latLng(pts[i+1]));
+
+                    // Ignorer si on clique près d'un point existant (rayon 25px)
+                    if (clickPt.distanceTo(p1) < 25 || clickPt.distanceTo(p2) < 25) return;
+
+                    const dist = L.LineUtil.pointToSegmentDistance(clickPt, p1, p2);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+
+                // Si on est à moins de 40 pixels de la ligne, on ajoute le point
+                if (minDistance < 40 && closestIndex !== -1) {
+                    const newPoint = [e.latlng.lat, e.latlng.lng];
+                    currentEditingRoute.points.splice(closestIndex + 1, 0, newPoint);
+                    currentEditingRoute.distance = getRouteDistance(currentEditingRoute.points);
+                    const routeIndex = routes.findIndex(r => r === currentEditingRoute);
+                    if (routeIndex !== -1) startEditVertices(routeIndex, 'route');
+                }
             }
-            if (closestIndex !== -1) {
-                zone.points.splice(closestIndex + 1, 0, [e.latlng.lat, e.latlng.lng]);
-                zone.polygon.setLatLngs(zone.points);
-                startEditVertices(zone.id, 'zone'); 
+            else if (editMode === 'zone' && currentEditingZone) {
+                let closestIndex = -1;
+                let minDistance = Infinity;
+                const pts = currentEditingZone.points;
+                const len = pts.length;
+
+                for (let i = 0; i < len; i++) {
+                    const p1 = map.latLngToContainerPoint(L.latLng(pts[i]));
+                    const p2 = map.latLngToContainerPoint(L.latLng(pts[(i+1)%len]));
+
+                    if (clickPt.distanceTo(p1) < 25 || clickPt.distanceTo(p2) < 25) return;
+
+                    const dist = L.LineUtil.pointToSegmentDistance(clickPt, p1, p2);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+
+                if (minDistance < 40 && closestIndex !== -1) {
+                    const newPoint = [e.latlng.lat, e.latlng.lng];
+                    currentEditingZone.points.splice(closestIndex + 1, 0, newPoint);
+                    if (currentEditingZone.polygon) currentEditingZone.polygon.setLatLngs(currentEditingZone.points);
+                    startEditVertices(currentEditingZone.id, 'zone');
+                }
             }
         }
 
@@ -553,7 +563,6 @@
                 polygon.bindTooltip(zone.name, { permanent: true, direction: 'center', className: 'zone-label', opacity: 0.9 });
             }
             polygon.bindPopup(`<div style="text-align:center;"><b>${zone.name}</b><br><br><button type="button" class="btn-danger" onclick="deleteZone(${zone.id})">Supprimer</button></div>`);
-            polygon.on('click', function(e) { handleZonePolygonClick(e, zone); });
         }
 
         function toggleZoneVisibility(id) {
@@ -607,6 +616,10 @@
         }
 
         map.on('click', function(e) {
+            if (isEditingVertices) {
+                handleEditMapClick(e);
+                return;
+            }
             if (isDrawingZone) {
                 tempZonePoints.push(e.latlng);
                 if (tempZonePolyline) map.removeLayer(tempZonePolyline);
@@ -615,6 +628,20 @@
             } else if (isMeasuring) {
                 addMeasurePoint(e.latlng);
             }
+        });
+
+        map.on('contextmenu', function(e) {
+            if (isEditingVertices) {
+                L.DomEvent.preventDefault(e.originalEvent);
+                handleEditMapClick(e);
+                return;
+            }
+            if (isBuildingRoute || isMeasuring || isDrawingZone) return; 
+            tempLatLng = e.latlng; editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
+            document.getElementById('modal-title').innerText = "Nouveau Point";
+            document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            document.getElementById('name-modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('new-point-name').focus(), 100);
         });
 
         // --- OUTIL DE MESURE ---
@@ -829,15 +856,6 @@
         }
 
         function formatDist(meters) { return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m"; }
-
-        map.on('contextmenu', function(e) {
-            if (isBuildingRoute || isMeasuring || isDrawingZone || isEditingVertices) return; 
-            tempLatLng = e.latlng; editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
-            document.getElementById('modal-title').innerText = "Nouveau Point";
-            document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            document.getElementById('name-modal').style.display = 'flex';
-            setTimeout(() => document.getElementById('new-point-name').focus(), 100);
-        });
 
         function saveCurrentLocationWaypoint() {
             if (isMeasuring || isDrawingZone || isEditingVertices) return;
