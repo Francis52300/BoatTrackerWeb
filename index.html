@@ -144,9 +144,9 @@
         }
 
         /* Le point blanc pour l'édition - CORRIGÉ */
-        .leaflet-marker-icon.vertex-marker {
-            z-index: 9999 !important;
-            pointer-events: auto !important;
+        .vertex-marker {
+            background: transparent;
+            touch-action: none; /* Empêche le défilement/zoom natif pendant le drag */
         }
         
         .zone-label {
@@ -189,7 +189,7 @@
     </div>
     
     <div id="edit-zone-panel" class="top-panel" style="background: #2196f3;">
-        <p>Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
+        <p>Édition : Glissez les points blancs pour ajuster. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
         <button type="button" onclick="stopEditZoneVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
@@ -255,8 +255,13 @@
     </div>
 
     <script>
+        // INITIALISATION DE LA CARTE
         const map = L.map('map', { rotate: true, rotateControl: true, touchRotate: true, zoomControl: false }).setView([48.5850, 4.7500], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        // CRÉATION D'UN CALQUE PRIORITAIRE POUR LES POINTS D'ÉDITION
+        map.createPane('editPane');
+        map.getPane('editPane').style.zIndex = 1000; 
 
         let waypointLayer = L.layerGroup().addTo(map);
         let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); 
@@ -326,10 +331,10 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // Icône Vertex ultra-visible
+        // Icône Vertex : Taille 22px, couleurs vives, pointer-events explicite
         const vertexIcon = L.divIcon({
             className: 'vertex-marker',
-            html: '<div style="width: 22px; height: 22px; background-color: #ffffff; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.8); box-sizing: border-box;"></div>',
+            html: '<div style="width: 22px; height: 22px; background-color: #ffffff; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.8); box-sizing: border-box; pointer-events: auto; touch-action: none;"></div>',
             iconSize: [28, 28],
             iconAnchor: [14, 14]
         });
@@ -338,7 +343,7 @@
         function startEditZoneVertices(id) {
             if (isMeasuring) toggleMeasure();
             if (isDrawingZone) cancelDrawZone();
-            if (isBuildingRoute) cancelRouteBuilding();
+            if (isBuildingRoute) cancelBuildingRoute();
             
             const zone = zones.find(z => z.id === id);
             if (!zone) return;
@@ -357,6 +362,9 @@
             isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'block';
             
+            // On désactive le déplacement de la carte pour éviter les conflits tactiles
+            map.dragging.disable();
+            
             document.getElementById('edit-zone-panel').style.display = 'block';
             
             if (zone.polygon) {
@@ -367,14 +375,12 @@
 
             editVertexLayer.clearLayers();
             
-            // On force le calque au-dessus
-            editVertexLayer.bringToFront();
-            
             zone.points.forEach((point, index) => {
                 const marker = L.marker(point, {
                     icon: vertexIcon, 
                     draggable: true,
-                    zIndexOffset: 1000 
+                    pane: 'editPane', // On place les marqueurs dans le calque prioritaire
+                    bubblingMouseEvents: false // Empêche le clic de se propager à la carte
                 }).addTo(editVertexLayer);
                 
                 marker.on('dragend', function(e) {
@@ -396,9 +402,6 @@
                     }
                 });
             });
-
-            // Forcer le rafraichissement visuel
-            setTimeout(() => { map.invalidateSize(); }, 50);
         }
 
         function stopEditZoneVertices() {
@@ -408,11 +411,40 @@
             editVertexLayer.clearLayers();
             document.getElementById('edit-zone-panel').style.display = 'none';
             
+            // On réactive le déplacement de la carte
+            map.dragging.enable();
+            
             if (currentEditingZone) {
                 saveZonesToStorage();
                 zoneLayer.clearLayers();
                 zones.forEach(drawZone);
                 currentEditingZone = null;
+            }
+        }
+
+        // Gestion du clic sur le polygone pour ajouter un point
+        function handleZonePolygonClick(e, zone) {
+            if (!isEditingVertices || currentEditingZone !== zone) return;
+            
+            let closestIndex = -1;
+            let minDistance = Infinity;
+            const clickPoint = e.latlng;
+            const points = zone.points;
+
+            for (let i = 0; i < points.length; i++) {
+                const p1 = L.latLng(points[i]);
+                const p2 = L.latLng(points[(i + 1) % points.length]);
+                const dist = L.LineUtil.pointToSegmentDistance(clickPoint, p1, p2);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestIndex = i;
+                }
+            }
+
+            if (closestIndex !== -1) {
+                zone.points.splice(closestIndex + 1, 0, [clickPoint.lat, clickPoint.lng]);
+                zone.polygon.setLatLngs(zone.points);
+                startEditZoneVertices(zone.id); 
             }
         }
 
@@ -472,7 +504,6 @@
             
             const polygon = L.polygon(zone.points, {
                 color: zColor, weight: 3, fillColor: zColor, fillOpacity: 0.3
-                // ON A SUPPRIMÉ LE DRAGGABLE ICI
             }).addTo(zoneLayer);
 
             zone.polygon = polygon;
@@ -493,6 +524,10 @@
                 </div>
             `;
             polygon.bindPopup(popupContent);
+            
+            polygon.on('click', function(e) {
+                handleZonePolygonClick(e, zone);
+            });
         }
 
         function toggleZoneVisibility(id) {
@@ -544,12 +579,7 @@
 
         function saveZonesToStorage() {
             const cleanZones = zones.map(z => ({ 
-                id: z.id, 
-                name: z.name, 
-                visible: z.visible, 
-                showName: z.showName,
-                color: z.color,
-                points: z.points 
+                id: z.id, name: z.name, visible: z.visible, showName: z.showName, color: z.color, points: z.points 
             }));
             localStorage.setItem('boatZones', JSON.stringify(cleanZones));
         }
