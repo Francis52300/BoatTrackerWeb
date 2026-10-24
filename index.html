@@ -143,7 +143,6 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* Le point blanc pour l'édition */
         .vertex-marker {
             background: transparent;
             touch-action: none;
@@ -188,7 +187,6 @@
         <button type="button" onclick="cancelDrawZone()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
     
-    <!-- Panneau d'édition générique (zones et routes) -->
     <div id="edit-panel" class="top-panel" style="background: #2196f3;">
         <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
         <button type="button" onclick="stopEditVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
@@ -275,12 +273,12 @@
         let isDrawingZone = false;
         let tempZonePoints = [];
 
-        // Variables d'édition
         let isEditingVertices = false;
-        let editMode = null; // 'zone' ou 'route'
+        let editMode = null; 
         let currentEditingZone = null;
         let currentEditingRoute = null;
         let editingPolyline = null;
+        let editHitBox = null; // NOUVEAU : Zone de clic invisible
 
         let measureLayer = L.layerGroup().addTo(map);
         let measureLine = null;
@@ -342,7 +340,6 @@
             iconAnchor: [14, 14]
         });
 
-        // Fonction pour calculer la distance d'une route
         function getRouteDistance(points) {
             if (!points || points.length < 2) return 0;
             let dist = 0;
@@ -378,12 +375,18 @@
                 
                 document.getElementById('edit-panel-text').innerText = "Édition de la zone : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
 
+                // Hitbox pour la zone
+                if (editHitBox) map.removeLayer(editHitBox);
+                editHitBox = L.polygon(zone.points, {color: 'rgba(0,0,0,0)', weight: 30, fillOpacity: 0, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                editHitBox.on('click', function(e) { handleZonePolygonClick(e, zone); });
+
                 zone.points.forEach((point, index) => {
                     const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
                     marker.on('dragend', function(e) {
                         const newLatLng = e.target.getLatLng();
                         zone.points[index] = [newLatLng.lat, newLatLng.lng];
                         if (zone.polygon) zone.polygon.setLatLngs(zone.points);
+                        if (editHitBox) editHitBox.setLatLngs(zone.points); // Maj Hitbox
                     });
                     marker.on('click', function(e) {
                         L.DomEvent.stopPropagation(e);
@@ -404,34 +407,16 @@
                 document.getElementById('edit-panel-text').innerText = "Édition de la route : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.";
 
                 if (editingPolyline) map.removeLayer(editingPolyline);
+                if (editHitBox) map.removeLayer(editHitBox); // Nettoie la Hitbox précédente
                 if (tempViewPolyline) { map.removeLayer(tempViewPolyline); tempViewPolyline = null; }
                 routePolyline.setLatLngs([]);
                 navPolyline.setLatLngs([]);
                 
                 editingPolyline = L.polyline(route.points, {color: '#1976D2', weight: 5}).addTo(map);
 
-                route.points.forEach((point, i) => {
-                    const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
-                    marker.on('dragend', function(e) {
-                        const newLatLng = e.target.getLatLng();
-                        route.points[i] = [newLatLng.lat, newLatLng.lng];
-                        editingPolyline.setLatLngs(route.points);
-                        route.distance = getRouteDistance(route.points);
-                    });
-                    marker.on('click', function(e) {
-                        L.DomEvent.stopPropagation(e);
-                        if (route.points.length <= 2) return alert("Une route doit avoir au moins 2 points.");
-                        if (confirm("Supprimer ce point ?")) {
-                            route.points.splice(i, 1);
-                            editingPolyline.setLatLngs(route.points);
-                            route.distance = getRouteDistance(route.points);
-                            startEditVertices(id, 'route'); 
-                        }
-                    });
-                });
-
-                editingPolyline.off('click');
-                editingPolyline.on('click', function(e) {
+                // Hitbox pour la route
+                editHitBox = L.polyline(route.points, {color: 'rgba(0,0,0,0)', weight: 30, interactive: true, bubblingMouseEvents: false}).addTo(map);
+                editHitBox.on('click', function(e) {
                     if (editMode !== 'route' || currentEditingRoute !== route) return;
                     let closestIndex = -1, minDist = Infinity;
                     for(let i=0; i<route.points.length-1; i++) {
@@ -447,6 +432,27 @@
                         startEditVertices(id, 'route'); 
                     }
                 });
+
+                route.points.forEach((point, i) => {
+                    const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
+                    marker.on('dragend', function(e) {
+                        const newLatLng = e.target.getLatLng();
+                        route.points[i] = [newLatLng.lat, newLatLng.lng];
+                        editingPolyline.setLatLngs(route.points);
+                        route.distance = getRouteDistance(route.points);
+                        if (editHitBox) editHitBox.setLatLngs(route.points); // Maj Hitbox
+                    });
+                    marker.on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        if (route.points.length <= 2) return alert("Une route doit avoir au moins 2 points.");
+                        if (confirm("Supprimer ce point ?")) {
+                            route.points.splice(i, 1);
+                            editingPolyline.setLatLngs(route.points);
+                            route.distance = getRouteDistance(route.points);
+                            startEditVertices(id, 'route'); 
+                        }
+                    });
+                });
             }
         }
 
@@ -455,6 +461,7 @@
             isEditingVertices = false;
             editVertexLayer.clearLayers();
             if (editingPolyline) { map.removeLayer(editingPolyline); editingPolyline = null; }
+            if (editHitBox) { map.removeLayer(editHitBox); editHitBox = null; } // Nettoyage Hitbox
             document.getElementById('edit-panel').style.display = 'none';
             map.dragging.enable();
             
