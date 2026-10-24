@@ -144,12 +144,13 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* Icône du sommet (Point blanc) garantie visible */
+        /* Le point blanc pour l'édition - FORCÉ POUR ÊTRE VISIBLE */
         .vertex-marker {
+            z-index: 9999 !important;
             background: transparent;
+            touch-action: none; /* Empêche le défilement de la page pendant le drag */
         }
         
-        /* Style du nom affiché sur la carte */
         .zone-label {
             background: rgba(255, 255, 255, 0.85);
             border: 1px solid #ccc;
@@ -159,9 +160,9 @@
             color: #333;
             padding: 2px 6px;
             border-radius: 4px;
-            pointer-events: none; /* Ne bloque pas les clics sur la carte */
+            pointer-events: none; 
         }
-        .zone-label::before { display: none; } /* Enlève la flèche du tooltip */
+        .zone-label::before { display: none; }
     </style>
 </head>
 <body>
@@ -266,6 +267,7 @@
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
         
         let zoneLayer = L.layerGroup().addTo(map);
+        // Calque des points d'édition ajouté en dernier pour être au-dessus
         let editVertexLayer = L.layerGroup().addTo(map);
         
         let tempZonePolyline = null;
@@ -327,12 +329,12 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // CORRECTION : Ajout d'un HTML explicite pour que le point soit bien visible
+        // CORRECTION DEFINITIVE : Point avec fond blanc, bordure bleue, taille 24px
         const vertexIcon = L.divIcon({
             className: 'vertex-marker',
-            html: '<div style="width: 18px; height: 18px; background: white; border: 3px solid #ff9800; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,0.6);"></div>',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
+            html: '<div style="width: 20px; height: 20px; background-color: white; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.8); box-sizing: border-box;"></div>',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
         });
 
         // --- ÉDITION DES SOMMETS DE ZONE ---
@@ -368,8 +370,16 @@
             }
 
             editVertexLayer.clearLayers();
+            // On s'assure que le calque des points est au-dessus de tout
+            editVertexLayer.bringToFront(); 
+            
             zone.points.forEach((point, index) => {
-                const marker = L.marker(point, {icon: vertexIcon, draggable: true}).addTo(editVertexLayer);
+                // zIndexOffset pour s'assurer que le marqueur est au-dessus du polygone
+                const marker = L.marker(point, {
+                    icon: vertexIcon, 
+                    draggable: true,
+                    zIndexOffset: 1000 
+                }).addTo(editVertexLayer);
                 
                 marker.on('dragend', function(e) {
                     const newLatLng = e.target.getLatLng();
@@ -462,8 +472,8 @@
                     id: Date.now(),
                     name: name,
                     visible: true,
-                    showName: true, // Nouvelle option activée par défaut
-                    color: '#ff9800', // Couleur par défaut
+                    showName: true, 
+                    color: '#ff9800', 
                     points: tempZonePoints.map(p => [p.lat, p.lng])
                 };
                 zones.push(zone);
@@ -493,7 +503,6 @@
 
             zone.polygon = polygon;
 
-            // Affichage du nom sur la carte (si activé)
             if (zone.showName !== false) {
                 polygon.bindTooltip(zone.name, {
                     permanent: true, 
