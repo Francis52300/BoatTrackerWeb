@@ -143,10 +143,10 @@
             filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.5));
         }
 
-        /* Le point blanc pour l'édition - CORRIGÉ */
+        /* Le point blanc pour l'édition */
         .vertex-marker {
             background: transparent;
-            touch-action: none; /* Empêche le défilement/zoom natif pendant le drag */
+            touch-action: none;
         }
         
         .zone-label {
@@ -189,7 +189,7 @@
     </div>
     
     <div id="edit-zone-panel" class="top-panel" style="background: #2196f3;">
-        <p>Édition : Glissez les points blancs pour ajuster. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
+        <p>Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne pour ajouter un point.</p>
         <button type="button" onclick="stopEditZoneVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
@@ -255,13 +255,12 @@
     </div>
 
     <script>
-        // INITIALISATION DE LA CARTE
         const map = L.map('map', { rotate: true, rotateControl: true, touchRotate: true, zoomControl: false }).setView([48.5850, 4.7500], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-        // CRÉATION D'UN CALQUE PRIORITAIRE POUR LES POINTS D'ÉDITION
+        // Calque prioritaire pour les points d'édition, placé juste au-dessus des tracés
         map.createPane('editPane');
-        map.getPane('editPane').style.zIndex = 1000; 
+        map.getPane('editPane').style.zIndex = 650; 
 
         let waypointLayer = L.layerGroup().addTo(map);
         let currentPolyline = L.polyline([], {color: '#ff0000', weight: 5, opacity: 0.8}).addTo(map); 
@@ -289,6 +288,9 @@
         
         let isMeasuring = false;
         let measurePoints = [];
+        
+        // NOUVEAU : Variable pour gérer l'enregistrement de trace
+        let isSavingTrack = false;
 
         let lastRenderLatLng = null;
         let lastRenderBearing = null;
@@ -331,7 +333,6 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // Icône Vertex : Taille 22px, couleurs vives, pointer-events explicite
         const vertexIcon = L.divIcon({
             className: 'vertex-marker',
             html: '<div style="width: 22px; height: 22px; background-color: #ffffff; border: 3px solid #2196f3; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.8); box-sizing: border-box; pointer-events: auto; touch-action: none;"></div>',
@@ -343,7 +344,7 @@
         function startEditZoneVertices(id) {
             if (isMeasuring) toggleMeasure();
             if (isDrawingZone) cancelDrawZone();
-            if (isBuildingRoute) cancelBuildingRoute();
+            if (isBuildingRoute) cancelRouteBuilding();
             
             const zone = zones.find(z => z.id === id);
             if (!zone) return;
@@ -362,7 +363,6 @@
             isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'block';
             
-            // On désactive le déplacement de la carte pour éviter les conflits tactiles
             map.dragging.disable();
             
             document.getElementById('edit-zone-panel').style.display = 'block';
@@ -379,8 +379,8 @@
                 const marker = L.marker(point, {
                     icon: vertexIcon, 
                     draggable: true,
-                    pane: 'editPane', // On place les marqueurs dans le calque prioritaire
-                    bubblingMouseEvents: false // Empêche le clic de se propager à la carte
+                    pane: 'editPane', 
+                    bubblingMouseEvents: false 
                 }).addTo(editVertexLayer);
                 
                 marker.on('dragend', function(e) {
@@ -410,8 +410,6 @@
             isEditingVertices = false;
             editVertexLayer.clearLayers();
             document.getElementById('edit-zone-panel').style.display = 'none';
-            
-            // On réactive le déplacement de la carte
             map.dragging.enable();
             
             if (currentEditingZone) {
@@ -422,7 +420,6 @@
             }
         }
 
-        // Gestion du clic sur le polygone pour ajouter un point
         function handleZonePolygonClick(e, zone) {
             if (!isEditingVertices || currentEditingZone !== zone) return;
             
@@ -858,6 +855,7 @@
             editingWaypointId = null;
             editingRouteIndex = null;
             editingZoneId = null;
+            isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Nouveau Point";
             document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             document.getElementById('name-modal').style.display = 'flex';
@@ -870,6 +868,7 @@
             editingWaypointId = null;
             editingRouteIndex = null;
             editingZoneId = null;
+            isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Ma Position";
             document.getElementById('new-point-name').value = "Ma position";
             document.getElementById('name-modal').style.display = 'flex';
@@ -882,6 +881,7 @@
                 editingWaypointId = id;
                 editingRouteIndex = null;
                 editingZoneId = null;
+                isSavingTrack = false;
                 document.getElementById('modal-title').innerText = "Modifier le point";
                 document.getElementById('new-point-name').value = wp.name;
                 document.getElementById('name-modal').style.display = 'flex';
@@ -893,6 +893,7 @@
             editingRouteIndex = index;
             editingWaypointId = null;
             editingZoneId = null;
+            isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Modifier la trace";
             document.getElementById('new-point-name').value = routes[index].name;
             document.getElementById('name-modal').style.display = 'flex';
@@ -905,6 +906,7 @@
                 editingZoneId = id;
                 editingWaypointId = null;
                 editingRouteIndex = null;
+                isSavingTrack = false;
                 document.getElementById('modal-title').innerText = "Modifier la zone";
                 document.getElementById('new-point-name').value = zone.name;
                 document.getElementById('name-modal').style.display = 'flex';
@@ -939,6 +941,9 @@
                     waypoints.push(wp);
                     saveWaypointsToStorage();
                     drawWaypoint(wp);
+                } else if (isSavingTrack) {
+                    routes.push({ name: name, date: new Date().toISOString(), distance: distance, points: currentTrack });
+                    saveRoutesToStorage();
                 }
             }
             closeNameModal();
@@ -950,6 +955,7 @@
             editingWaypointId = null;
             editingRouteIndex = null;
             editingZoneId = null;
+            isSavingTrack = false;
             document.getElementById('new-point-name').blur();
             if(document.getElementById('modal').style.display === 'flex') renderMenuLists(); 
         }
@@ -1204,12 +1210,11 @@
                 btn.classList.remove('recording');
                 
                 if (currentTrack.length > 0) {
-                    const name = prompt("Nom de cette trace GPS :", "Sortie du " + new Date().toLocaleDateString());
-                    if (name) {
-                        routes.push({ name: name, date: new Date().toISOString(), distance: distance, points: currentTrack });
-                        saveRoutesToStorage();
-                        alert("Trace sauvegardée !");
-                    }
+                    isSavingTrack = true;
+                    document.getElementById('modal-title').innerText = "Nom de la trace";
+                    document.getElementById('new-point-name').value = "Sortie du " + new Date().toLocaleDateString();
+                    document.getElementById('name-modal').style.display = 'flex';
+                    setTimeout(() => document.getElementById('new-point-name').focus(), 100);
                 }
             }
         }
