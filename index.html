@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.min.js"></script>
+    <!-- NOUVEAU : Module pour déplacer les polygones -->
+    <script src="https://unpkg.com/leaflet-path-drag@2.0.0/dist/L.Path.Drag.min.js"></script>
     
     <link rel="manifest" href="manifest.json">
     <style>
@@ -59,7 +61,9 @@
         #btn-recenter { display: none; top: 90px; right: 20px; color: #1976D2; }
         #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
         #btn-measure { top: 220px; right: 20px; color: #4caf50; border-color: #4caf50; }
-        #btn-download { top: 285px; right: 20px; }
+        /* NOUVEAU BOUTON ZONE */
+        #btn-draw-zone { top: 285px; right: 20px; color: #ff9800; border-color: #ff9800; }
+        #btn-download { top: 350px; right: 20px; }
 
         #compass-degrees {
             position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
@@ -163,6 +167,13 @@
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
 
+    <!-- NOUVEAU PANNEAU DE DESSIN DE ZONE -->
+    <div id="draw-zone-panel" style="display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #ff9800; color: white; padding: 10px; border-radius: 8px; z-index: 2000; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); width: 80%;">
+        <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 14px;">Touchez la carte pour dessiner les angles de la zone</p>
+        <button type="button" onclick="finishZone()" style="background:white; color:#ff9800; width: auto; display: inline-block; padding: 5px 15px; font-size: 14px; margin-right:5px;">Terminer</button>
+        <button type="button" onclick="cancelDrawZone()" style="background:#d32f2f; color:white; width: auto; display: inline-block; padding: 5px 15px; font-size: 14px;">Annuler</button>
+    </div>
+
     <button type="button" class="fab" id="btn-menu" onclick="openMenu()">☰</button>
 
     <div id="compass-container">
@@ -176,8 +187,9 @@
 
     <button type="button" class="fab" id="btn-recenter" onclick="resetMapView()">🎯</button>
     <button type="button" class="fab" id="btn-save-poi" onclick="saveCurrentLocationWaypoint()">📍</button>
-    <!-- NOUVEAU BOUTON MESURE -->
     <button type="button" class="fab" id="btn-measure" onclick="toggleMeasure()">📏</button>
+    <!-- NOUVEAU BOUTON ZONE -->
+    <button type="button" class="fab" id="btn-draw-zone" onclick="toggleDrawZone()">⬡</button>
     
     <button type="button" class="fab" id="btn-download" onclick="downloadMapArea()">💾</button>
 
@@ -214,8 +226,10 @@
             
             <h3 style="margin-top: 20px;">🗺️ Mes Traces</h3>
             <div id="route-list"></div>
+
+            <h3 style="margin-top: 20px;">⬡ Mes Zones</h3>
+            <div id="zone-list"></div>
             
-            <!-- NOUVEAUX BOUTONS DE SAUVEGARDE -->
             <h3 style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;">💾 Sauvegarde</h3>
             <button type="button" class="btn-data" onclick="exportData()">Exporter mes données (Fichier)</button>
             <button type="button" class="btn-data" onclick="document.getElementById('import-file').click()">Importer un fichier</button>
@@ -235,7 +249,12 @@
         let routeBuilderPolyline = L.polyline([], {color: '#f39c12', weight: 4}).addTo(map); 
         let navPolyline = L.polyline([], {color: '#0056b3', weight: 3, dashArray: '5, 10', opacity: 0.8}).addTo(map);
         
-        // Calques pour la mesure
+        // Calques et variables pour les zones
+        let zoneLayer = L.layerGroup().addTo(map);
+        let tempZonePolyline = null;
+        let isDrawingZone = false;
+        let tempZonePoints = [];
+
         let measureLayer = L.layerGroup().addTo(map);
         let measureLine = null;
         
@@ -244,7 +263,6 @@
         let activeRoute = null; 
         let isAutoCenter = true; 
         
-        // Variables de mesure
         let isMeasuring = false;
         let measurePoints = [];
 
@@ -270,12 +288,14 @@
 
         let waypoints = JSON.parse(localStorage.getItem('boatWaypoints')) || [];
         let routes = JSON.parse(localStorage.getItem('boatTracks')) || [];
+        let zones = JSON.parse(localStorage.getItem('boatZones')) || []; // NOUVEAU
         
         let isBuildingRoute = false;
         let routeBuilderPoints = [];
         let tempLatLng = null; 
         let editingWaypointId = null; 
-        let editingRouteIndex = null; 
+        let editingRouteIndex = null;
+        let editingZoneId = null; // NOUVEAU
 
         const customIcon = L.divIcon({
             className: 'custom-div-icon', html: "📍",
@@ -287,13 +307,114 @@
             iconSize: [20, 20], iconAnchor: [10, 10]
         });
 
-        // --- OUTIL DE MESURE ---
+        // --- GESTION DES ZONES (DESSIN ET DÉPLACEMENT) ---
+        function toggleDrawZone() {
+            isDrawingZone = !isDrawingZone;
+            const btn = document.getElementById('btn-draw-zone');
+            
+            if (isDrawingZone) {
+                isAutoCenter = false;
+                document.getElementById('btn-recenter').style.display = 'block';
+                btn.classList.add('active-mode');
+                document.getElementById('draw-zone-panel').style.display = 'block';
+                tempZonePoints = [];
+                if (tempZonePolyline) map.removeLayer(tempZonePolyline);
+            } else {
+                cancelDrawZone();
+            }
+        }
+
+        function finishZone() {
+            if (tempZonePoints.length < 3) {
+                alert("Il faut au moins 3 points pour former une zone.");
+                return;
+            }
+            const name = prompt("Nom / Commentaire de cette zone :", "Zone réglementée");
+            if (name) {
+                const zone = {
+                    id: Date.now(),
+                    name: name,
+                    points: tempZonePoints.map(p => [p.lat, p.lng])
+                };
+                zones.push(zone);
+                saveZonesToStorage();
+                drawZone(zone);
+            }
+            cancelDrawZone();
+        }
+
+        function cancelDrawZone() {
+            isDrawingZone = false;
+            tempZonePoints = [];
+            if (tempZonePolyline) { map.removeLayer(tempZonePolyline); tempZonePolyline = null; }
+            document.getElementById('btn-draw-zone').classList.remove('active-mode');
+            document.getElementById('draw-zone-panel').style.display = 'none';
+        }
+
+        function drawZone(zone) {
+            const polygon = L.polygon(zone.points, {
+                color: '#ff9800', weight: 3, fillColor: '#ff9800', fillOpacity: 0.3,
+                // On active le module de déplacement
+                draggable: true 
+            }).addTo(zoneLayer);
+
+            // Mémoriser l'objet pour pouvoir le retrouver
+            zone.polygon = polygon;
+
+            // Gestion du popup
+            const popupContent = `
+                <div style="text-align:center;">
+                    <b>${zone.name}</b><br><br>
+                    <button type="button" class="btn-danger" onclick="deleteZone(${zone.id})">Supprimer</button>
+                </div>
+            `;
+            polygon.bindPopup(popupContent);
+
+            // Mise à jour des coordonnées quand on déplace la zone
+            polygon.on('dragend', function() {
+                const newPoints = polygon.getLatLngs()[0].map(p => [p.lat, p.lng]);
+                zone.points = newPoints;
+                saveZonesToStorage();
+            });
+        }
+
+        function deleteZone(id) {
+            if(confirm("Supprimer cette zone ?")) {
+                zones = zones.filter(z => z.id !== id);
+                saveZonesToStorage();
+                zoneLayer.clearLayers();
+                zones.forEach(drawZone);
+                map.closePopup();
+                if(document.getElementById('modal').style.display === 'flex') renderMenuLists();
+            }
+        }
+
+        function saveZonesToStorage() {
+            // Nettoyer les références à l'objet Leaflet avant de sauvegarder
+            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, points: z.points }));
+            localStorage.setItem('boatZones', JSON.stringify(cleanZones));
+        }
+
+        // Clic sur la carte pour le dessin de zone
+        map.on('click', function(e) {
+            if (isDrawingZone) {
+                tempZonePoints.push(e.latlng);
+                if (tempZonePolyline) map.removeLayer(tempZonePolyline);
+                tempZonePolyline = L.polyline(tempZonePoints, {color: '#ff9800', dashArray: '5, 5'}).addTo(map);
+                if (tempZonePoints.length > 2) {
+                    tempZonePolyline.addLatLng(tempZonePoints[0]); // Fermer visuellement la boucle
+                }
+            } else if (isMeasuring) {
+                addMeasurePoint(e.latlng);
+            }
+        });
+
+        // --- OUTIL DE MESURE (Inchangé) ---
         function toggleMeasure() {
             isMeasuring = !isMeasuring;
             const btn = document.getElementById('btn-measure');
-            
-            // On désactive le centrage auto pour pouvoir cliquer librement sur la carte
             if (isMeasuring) {
+                if (isDrawingZone) cancelDrawZone();
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
                 btn.classList.add('active-mode');
@@ -311,8 +432,6 @@
 
         function addMeasurePoint(latlng) {
             if (!isMeasuring) return;
-            
-            // Si on a déjà 2 points, on efface et on recommence
             if (measurePoints.length >= 2) clearMeasure();
 
             measurePoints.push(latlng);
@@ -322,41 +441,30 @@
                 const p1 = measurePoints[0];
                 const p2 = measurePoints[1];
                 const dist = p1.distanceTo(p2);
-                
                 measureLine = L.polyline([p1, p2], {color: '#4caf50', weight: 4, dashArray: '5, 5'}).addTo(measureLayer);
                 const midPoint = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
-                
-                L.popup()
-                    .setLatLng(midPoint)
-                    .setContent(`<b>Distance</b><br>${formatDist(dist)}`)
-                    .openOn(map);
+                L.popup().setLatLng(midPoint).setContent(`<b>Distance</b><br>${formatDist(dist)}`).openOn(map);
             } else {
-                L.popup()
-                    .setLatLng(latlng)
-                    .setContent("Point de départ.<br>Touchez un 2ème point.")
-                    .openOn(map);
+                L.popup().setLatLng(latlng).setContent("Point de départ.<br>Touchez un 2ème point.").openOn(map);
             }
         }
 
-        // Clic sur la carte pour mesurer
-        map.on('click', function(e) {
-            if (isMeasuring) addMeasurePoint(e.latlng);
-        });
-
-        // --- SAUVEGARDE ET RESTAURATION ---
+        // --- SAUVEGARDE ET RESTAURATION (Mise à jour avec Zones) ---
         function exportData() {
-            // On retire l'objet "marker" des points pour éviter l'erreur JSON circulaire
             const cleanWaypoints = waypoints.map(wp => ({ id: wp.id, name: wp.name, lat: wp.lat, lng: wp.lng }));
+            const cleanZones = zones.map(z => ({ id: z.id, name: z.name, points: z.points }));
+            
             const data = {
                 waypoints: cleanWaypoints,
-                routes: routes
+                routes: routes,
+                zones: cleanZones // On ajoute les zones au fichier !
             };
             
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
             const downloadAnchorNode = document.createElement('a');
             downloadAnchorNode.setAttribute("href", dataStr);
             downloadAnchorNode.setAttribute("download", "trace_bateau_sauvegarde.json");
-            document.body.appendChild(downloadAnchorNode); // requis pour Firefox
+            document.body.appendChild(downloadAnchorNode);
             downloadAnchorNode.click();
             downloadAnchorNode.remove();
         }
@@ -369,20 +477,22 @@
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
-                    
                     if (data.waypoints && data.routes) {
                         if(confirm("Voulez-vous vraiment écraser vos données actuelles par ce fichier ?")) {
                             waypoints = data.waypoints;
                             routes = data.routes;
+                            zones = data.zones || []; // Si le fichier n'a pas de zones (ancienne version)
                             
                             saveWaypointsToStorage();
                             saveRoutesToStorage();
+                            saveZonesToStorage();
                             
-                            // Nettoyage et redessin
                             waypointLayer.clearLayers();
-                            waypoints.forEach(drawWaypoint);
+                            zoneLayer.clearLayers();
                             
-                            // Réinitialiser l'interface
+                            waypoints.forEach(drawWaypoint);
+                            zones.forEach(drawZone);
+                            
                             closeMenu();
                             stopFollowingRoute();
                             alert("Données importées avec succès !");
@@ -395,7 +505,6 @@
                 }
             };
             reader.readAsText(file);
-            // Reset l'input pour pouvoir réimporter le même fichier
             event.target.value = '';
         }
 
@@ -555,10 +664,11 @@
         }
 
         map.on('contextmenu', function(e) {
-            if (isBuildingRoute || isMeasuring) return; 
+            if (isBuildingRoute || isMeasuring || isDrawingZone) return; 
             tempLatLng = e.latlng;
             editingWaypointId = null;
             editingRouteIndex = null;
+            editingZoneId = null;
             document.getElementById('modal-title').innerText = "Nouveau Point";
             document.getElementById('new-point-name').value = "Point " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             document.getElementById('name-modal').style.display = 'flex';
@@ -566,10 +676,11 @@
         });
 
         function saveCurrentLocationWaypoint() {
-            if (isMeasuring) return;
+            if (isMeasuring || isDrawingZone) return;
             tempLatLng = userMarker.getLatLng();
             editingWaypointId = null;
             editingRouteIndex = null;
+            editingZoneId = null;
             document.getElementById('modal-title').innerText = "Ma Position";
             document.getElementById('new-point-name').value = "Ma position";
             document.getElementById('name-modal').style.display = 'flex';
@@ -581,6 +692,7 @@
             if (wp) {
                 editingWaypointId = id;
                 editingRouteIndex = null;
+                editingZoneId = null;
                 document.getElementById('modal-title').innerText = "Modifier le point";
                 document.getElementById('new-point-name').value = wp.name;
                 document.getElementById('name-modal').style.display = 'flex';
@@ -591,16 +703,39 @@
         function editRouteName(index) {
             editingRouteIndex = index;
             editingWaypointId = null;
+            editingZoneId = null;
             document.getElementById('modal-title').innerText = "Modifier la trace";
             document.getElementById('new-point-name').value = routes[index].name;
             document.getElementById('name-modal').style.display = 'flex';
             setTimeout(() => document.getElementById('new-point-name').focus(), 100);
         }
+        
+        // NOUVEAU : Modifier le nom d'une zone
+        function editZone(id) {
+            const zone = zones.find(z => z.id === id);
+            if (zone) {
+                editingZoneId = id;
+                editingWaypointId = null;
+                editingRouteIndex = null;
+                document.getElementById('modal-title').innerText = "Modifier la zone";
+                document.getElementById('new-point-name').value = zone.name;
+                document.getElementById('name-modal').style.display = 'flex';
+                setTimeout(() => document.getElementById('new-point-name').focus(), 100);
+            }
+        }
 
         function confirmNewName() {
             const name = document.getElementById('new-point-name').value;
             if (name) {
-                if (editingRouteIndex !== null) {
+                if (editingZoneId) {
+                    const zone = zones.find(z => z.id === editingZoneId);
+                    if (zone) {
+                        zone.name = name;
+                        saveZonesToStorage();
+                        zoneLayer.clearLayers();
+                        zones.forEach(drawZone);
+                    }
+                } else if (editingRouteIndex !== null) {
                     routes[editingRouteIndex].name = name;
                     saveRoutesToStorage();
                     if(activeRoute && activeRoute.name !== name) activeRoute.name = name; 
@@ -626,6 +761,7 @@
             tempLatLng = null;
             editingWaypointId = null;
             editingRouteIndex = null;
+            editingZoneId = null;
             document.getElementById('new-point-name').blur();
             if(document.getElementById('modal').style.display === 'flex') renderMenuLists(); 
         }
@@ -634,11 +770,9 @@
             const marker = L.marker([wp.lat, wp.lng], {icon: customIcon}).addTo(waypointLayer);
             wp.marker = marker;
             marker.bindPopup(`<b>${wp.name}</b>`);
-            
-            // Modification du clic sur les punaises pour gérer le mode mesure
             marker.on('click', (e) => {
                 if (isMeasuring) {
-                    L.DomEvent.stopPropagation(e); // Empêche le clic de la carte en dessous
+                    L.DomEvent.stopPropagation(e); 
                     addMeasurePoint(L.latLng(wp.lat, wp.lng));
                 } else if (isBuildingRoute) {
                     addPointToRoute(wp);
@@ -705,7 +839,8 @@
                 alert("Créez d'abord au moins 1 point sur la carte !");
                 return;
             }
-            if (isMeasuring) toggleMeasure(); // Désactive la mesure
+            if (isMeasuring) toggleMeasure();
+            if (isDrawingZone) toggleDrawZone();
             
             isBuildingRoute = true;
             routeBuilderPoints = [];
@@ -755,7 +890,8 @@
 
         function startFollowingRoute(index) {
             if (tempViewPolyline) map.removeLayer(tempViewPolyline);
-            if (isMeasuring) toggleMeasure(); // Désactive la mesure
+            if (isMeasuring) toggleMeasure();
+            if (isDrawingZone) toggleDrawZone();
 
             navPolyline.setLatLngs([]);
             activeRoute = routes[index];
@@ -822,6 +958,23 @@
                     </div>
                 `;
                 routeList.appendChild(div);
+            });
+            
+            // NOUVELLE LISTE : ZONES
+            const zoneList = document.getElementById('zone-list');
+            zoneList.innerHTML = zones.length === 0 ? "<p style='font-size:14px;color:#666'>Aucune zone enregistrée.</p>" : "";
+            zones.forEach(z => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.innerHTML = `
+                    <span>${z.name}</span>
+                    <div>
+                        <button type="button" class="btn-edit" onclick="editZone(${z.id})">✏️</button>
+                        <button type="button" class="btn-view" onclick="centerOnPoint(${z.points[0][0]}, ${z.points[0][1]}); closeMenu();">Voir</button>
+                        <button type="button" class="btn-danger" onclick="deleteZone(${z.id})">X</button>
+                    </div>
+                `;
+                zoneList.appendChild(div);
             });
             
             if(activeRoute || activeDestination) {
@@ -902,9 +1055,11 @@
             }
         }
 
+        // Initialisation au démarrage
         startGPS();
         initCompass();
         waypoints.forEach(drawWaypoint);
+        zones.forEach(drawZone); // On affiche les zones sauvegardées
     </script>
 </body>
 </html>
