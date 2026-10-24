@@ -188,7 +188,7 @@
     </div>
     
     <div id="edit-panel" class="top-panel" style="background: #2196f3;">
-        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Touchez la ligne (surbrillance bleue) pour ajouter un point.</p>
+        <p id="edit-panel-text">Édition : Glissez les points blancs. Touchez un point pour le supprimer. Faites un appui long sur la ligne pour ajouter un point.</p>
         <button type="button" onclick="stopEditVertices()" style="background:white; color:#2196f3;">Terminer l'édition</button>
     </div>
 
@@ -362,8 +362,10 @@
             isAutoCenter = false;
             document.getElementById('btn-recenter').style.display = 'block';
             
-            // On désactive le déplacement de la carte pour éviter les conflits tactiles
+            // On désactive le déplacement ET la rotation de la carte
             map.dragging.disable();
+            if (map.touchRotate) map.touchRotate.disable();
+            if (map.rotate) map.rotate.disable();
             
             document.getElementById('edit-panel').style.display = 'block';
             editVertexLayer.clearLayers();
@@ -375,11 +377,15 @@
                 if (zone.visible === false) { zone.visible = true; saveZonesToStorage(); zoneLayer.clearLayers(); zones.forEach(drawZone); }
                 if (zone.polygon) { zone.polygon.closePopup(); zone.polygon.unbindPopup(); zone.polygon.unbindTooltip(); }
                 
-                // Hitbox invisible mais interactive (opacité 0.01 pour forcer le navigateur à l'activer)
+                // Hitbox invisible mais interactive
                 if (editHitBox) map.removeLayer(editHitBox);
                 editHitBox = L.polygon(zone.points, {color: 'rgba(255,255,255,0.01)', weight: 40, fillOpacity: 0.01, interactive: true, bubblingMouseEvents: false}).addTo(map);
                 editHitBox.bringToFront();
-                editHitBox.on('click', function(e) { handleZonePolygonClick(e, zone); });
+                // CLIC ou APPUI LONG (contextmenu)
+                editHitBox.on('click contextmenu', function(e) { 
+                    L.DomEvent.stopPropagation(e); 
+                    handleZonePolygonClick(e, zone); 
+                });
 
                 zone.points.forEach((point, index) => {
                     const marker = L.marker(point, { icon: vertexIcon, draggable: true, pane: 'editPane', bubblingMouseEvents: false }).addTo(editVertexLayer);
@@ -411,13 +417,13 @@
                 routePolyline.setLatLngs([]);
                 navPolyline.setLatLngs([]);
                 
-                // La ligne visible
                 editingPolyline = L.polyline(route.points, {color: '#1976D2', weight: 5}).addTo(map);
 
-                // Hitbox pour la route (épaisse, transparente, interactive)
                 editHitBox = L.polyline(route.points, {color: 'rgba(255,255,255,0.01)', weight: 40, interactive: true, bubblingMouseEvents: false}).addTo(map);
                 editHitBox.bringToFront();
-                editHitBox.on('click', function(e) {
+                // CLIC ou APPUI LONG (contextmenu)
+                editHitBox.on('click contextmenu', function(e) {
+                    L.DomEvent.stopPropagation(e);
                     if (editMode !== 'route' || currentEditingRoute !== route) return;
                     let closestIndex = -1, minDist = Infinity;
                     for(let i=0; i<route.points.length-1; i++) {
@@ -464,7 +470,11 @@
             if (editingPolyline) { map.removeLayer(editingPolyline); editingPolyline = null; }
             if (editHitBox) { map.removeLayer(editHitBox); editHitBox = null; } 
             document.getElementById('edit-panel').style.display = 'none';
+            
+            // On réactive le déplacement et la rotation de la carte
             map.dragging.enable();
+            if (map.touchRotate) map.touchRotate.enable();
+            if (map.rotate) map.rotate.enable();
             
             if (editMode === 'zone' && currentEditingZone) {
                 saveZonesToStorage();
