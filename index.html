@@ -59,6 +59,7 @@
         #btn-save-poi { top: 155px; right: 20px; color: #d32f2f; border-color: #d32f2f; }
         #btn-download { top: 220px; right: 20px; }
 
+        /* Boussole interne */
         #compass-degrees {
             position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
             font-size: 12px; font-weight: bold; color: #333; background: white;
@@ -176,9 +177,10 @@
                 <div id="speed">0.0</div>
                 <div style="font-size:12px; color:#666; margin-top:-5px;">Vitesse</div>
             </div>
+            <!-- CHANGEMENT ICI : Le libellé est plus clair -->
             <div id="heading-box">
                 <div id="heading-val">0°</div>
-                <div style="font-size:12px; color:#666; margin-top:-5px;">Cap à suivre</div>
+                <div style="font-size:12px; color:#666; margin-top:-5px;">Cap cible (GPS)</div>
             </div>
         </div>
         
@@ -222,7 +224,6 @@
         let activeRoute = null; 
         let isAutoCenter = true; 
 
-        // --- VARIABLES POUR LISSER L'AFFICHAGE ---
         let lastRenderLatLng = null;
         let lastRenderBearing = null;
 
@@ -362,27 +363,23 @@
             headingBox.style.display = 'block';
             document.getElementById('heading-val').textContent = Math.round(brng) + '°';
 
-            // --- AMÉLIORATION DE LA FLUIDITÉ ICI ---
             if (isAutoCenter) {
-                // On ne met à jour que si on a bougé de 1,5m ou tourné de 2° (évite le tremblement à l'arrêt)
                 let shouldUpdate = true;
                 if (lastRenderLatLng && lastRenderBearing !== null) {
                     const movedDist = currentLatLng.distanceTo(lastRenderLatLng);
                     let angleDiff = Math.abs(brng - lastRenderBearing);
-                    angleDiff = Math.min(angleDiff, 360 - angleDiff); // Le plus court chemin
+                    angleDiff = Math.min(angleDiff, 360 - angleDiff);
 
                     if (movedDist < 1.5 && angleDiff < 2) {
-                        shouldUpdate = false; // On ignore la mise à jour
+                        shouldUpdate = false;
                     }
                 }
 
                 if (shouldUpdate) {
-                    // Animations fluides au lieu de sauts brusques
                     map.panTo(currentLatLng, {animate: true, duration: 0.5});
                     map.setBearing(brng, {animate: true, duration: 0.5});
                     document.getElementById('boat-img').style.transform = `rotate(0deg)`;
                     
-                    // On mémorise l'état pour la prochaine comparaison
                     lastRenderLatLng = currentLatLng;
                     lastRenderBearing = brng;
                 }
