@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Trace Bateau - Lac du Der</title>
+    <title>GPS Froggy - Lac du Der</title>
     
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
     
@@ -18,12 +18,11 @@
         
         .leaflet-control-zoom { display: none !important; }
         
-        /* MODIFICATION : Panneau un peu plus transparent (0.85 au lieu de 0.95) */
         #panel {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.85); padding: 15px; border-radius: 15px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; width: 280px; text-align: center;
-            backdrop-filter: blur(5px); /* Ajoute un léger flou pour la lisibilité */
+            backdrop-filter: blur(5px); 
         }
         #speed-container { display: flex; justify-content: space-around; align-items: center; margin-bottom: 5px; }
         #speed { font-size: 42px; font-weight: bold; color: #1976D2; }
@@ -97,13 +96,14 @@
             padding: 10px 0; border-bottom: 1px solid #eee;
         }
         .list-item span { flex: 1; margin-right: 10px; font-size: 14px; }
-        .list-item div { display: flex; gap: 2px; align-items:center; }
+        .list-item div { display: flex; gap: 2px; align-items:center; flex-wrap: wrap; justify-content: flex-end;}
         .list-item button { width: auto; margin: 0; padding: 6px 8px; font-size: 12px; }
         
         .btn-danger { background: #d32f2f; color: white; }
         .btn-follow { background: #4caf50; color: white; }
         .btn-edit { background: #f39c12; color: white; }
         .btn-view { background: #1976D2; color: white; }
+        .btn-copy { background: #9c27b0; color: white; }
         .btn-close { background: #666; color: white; margin-top: 15px; }
         .btn-data { background: #607d8b; color: white; margin-top: 5px; }
         
@@ -178,7 +178,7 @@
     </div>
 
     <div id="build-route-panel" class="top-panel" style="background: #f39c12;">
-        <p id="build-route-text">Touchez les punaises pour créer votre route</p>
+        <p id="build-route-text">Touchez la carte (ou les punaises) pour créer votre route</p>
         <button type="button" onclick="saveBuiltRoute()" style="background:white; color:#f39c12; margin-right:5px;">Enregistrer</button>
         <button type="button" onclick="cancelRouteBuilding()" style="background:#d32f2f; color:white;">Annuler</button>
     </div>
@@ -230,7 +230,6 @@
         <div id="stats">Distance : 0 m</div>
         <button type="button" id="btn-record" onclick="toggleRecording()">Démarrer l'enregistrement</button>
         
-        <!-- AJOUT DE LA SIGNATURE ICI -->
         <div style="font-size: 11px; color: #888; margin-top: 8px; font-style: italic;">Réalisation f.EDOT</div>
     </div>
 
@@ -351,6 +350,25 @@
                 dist += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
             }
             return dist;
+        }
+
+        // --- DUPLIQUER UNE ROUTE ---
+        function duplicateRoute(index) {
+            const rt = routes[index];
+            const name = prompt("Nom de la nouvelle route :", rt.name + " (Copie)");
+            if (name) {
+                const newRoute = {
+                    name: name,
+                    date: new Date().toISOString(),
+                    distance: getRouteDistance(rt.points),
+                    points: JSON.parse(JSON.stringify(rt.points))
+                };
+                routes.push(newRoute);
+                saveRoutesToStorage();
+                renderMenuLists();
+                // Ouvre directement l'édition pour la nouvelle route
+                startEditVertices(routes.length - 1, 'route');
+            }
         }
 
         // --- ÉDITION (ZONES ET ROUTES) ---
@@ -522,6 +540,7 @@
             if (isDrawingZone) {
                 if (isEditingVertices) stopEditVertices();
                 if (isMeasuring) toggleMeasure();
+                if (isBuildingRoute) cancelRouteBuilding();
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
                 btn.classList.add('active-mode');
@@ -627,6 +646,15 @@
                 if (tempZonePoints.length > 2) tempZonePolyline.addLatLng(tempZonePoints[0]);
             } else if (isMeasuring) {
                 addMeasurePoint(e.latlng);
+            } else if (isBuildingRoute) {
+                // NOUVEAU : Ajouter un point à la route en cliquant sur la carte
+                if (routeBuilderPoints.length > 0) {
+                    const lastPt = routeBuilderPoints[routeBuilderPoints.length - 1];
+                    const lastLatLng = L.latLng(lastPt.lat, lastPt.lng);
+                    if (lastLatLng.distanceTo(e.latlng) < 5) return; // Ignore si trop proche
+                }
+                routeBuilderPoints.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+                routeBuilderPolyline.addLatLng(e.latlng);
             }
         });
 
@@ -651,6 +679,7 @@
             if (isMeasuring) {
                 if (isDrawingZone) cancelDrawZone();
                 if (isEditingVertices) stopEditVertices();
+                if (isBuildingRoute) cancelRouteBuilding();
                 isAutoCenter = false;
                 document.getElementById('btn-recenter').style.display = 'block';
                 btn.classList.add('active-mode');
@@ -858,7 +887,7 @@
         function formatDist(meters) { return meters > 1000 ? (meters / 1000).toFixed(2) + " km" : meters.toFixed(0) + " m"; }
 
         function saveCurrentLocationWaypoint() {
-            if (isMeasuring || isDrawingZone || isEditingVertices) return;
+            if (isMeasuring || isDrawingZone || isEditingVertices || isBuildingRoute) return;
             tempLatLng = userMarker.getLatLng(); editingWaypointId = null; editingRouteIndex = null; editingZoneId = null; isSavingTrack = false;
             document.getElementById('modal-title').innerText = "Ma Position";
             document.getElementById('new-point-name').value = "Ma position";
@@ -933,7 +962,10 @@
             marker.bindPopup(`<b>${wp.name}</b>`);
             marker.on('click', (e) => {
                 if (isMeasuring) { L.DomEvent.stopPropagation(e); addMeasurePoint(L.latLng(wp.lat, wp.lng)); } 
-                else if (isBuildingRoute) { addPointToRoute(wp); }
+                else if (isBuildingRoute) { 
+                    L.DomEvent.stopPropagation(e);
+                    addPointToRoute(wp); 
+                }
             });
         }
 
@@ -978,27 +1010,28 @@
         }
 
         function startRouteBuilding() {
-            if (waypoints.length < 1) return alert("Créez d'abord au moins 1 point sur la carte !");
-            if (isMeasuring) toggleMeasure(); if (isDrawingZone) toggleDrawZone(); if (isEditingVertices) stopEditVertices();
+            if (isMeasuring) toggleMeasure(); 
+            if (isDrawingZone) cancelDrawZone(); 
+            if (isEditingVertices) stopEditVertices();
             
             isBuildingRoute = true; routeBuilderPoints = []; routeBuilderPolyline.setLatLngs([]); closeMenu();
 
-            const startFromCurrent = confirm("Voulez-vous commencer cette route depuis votre position actuelle ?\n\n(Cliquez sur 'Annuler' pour commencer directement par choisir un point sur la carte)");
+            const startFromCurrent = confirm("Voulez-vous commencer cette route depuis votre position actuelle ?\n\n(Cliquez sur 'Annuler' pour commencer directement par toucher la carte)");
             
             if (startFromCurrent) {
                 const currentLatLng = userMarker.getLatLng();
                 routeBuilderPolyline.addLatLng(currentLatLng);
-                routeBuilderPoints.push({ lat: currentLatLng.lat, lng: currentLatLng.lng, name: "Départ" });
-                document.getElementById('build-route-text').innerText = "Départ ajouté ! Touchez les punaises suivantes.";
+                routeBuilderPoints.push({ lat: currentLatLng.lat, lng: currentLatLng.lng });
+                document.getElementById('build-route-text').innerText = "Départ ajouté ! Touchez la carte pour continuer.";
             } else {
-                document.getElementById('build-route-text').innerText = "Touchez les punaises pour créer votre route";
+                document.getElementById('build-route-text').innerText = "Touchez la carte (ou les punaises) pour créer votre route";
             }
             document.getElementById('build-route-panel').style.display = 'block';
         }
 
         function addPointToRoute(wp) {
-            if (routeBuilderPoints.length > 0 && routeBuilderPoints[routeBuilderPoints.length - 1].id === wp.id) return;
-            routeBuilderPoints.push(wp);
+            if (routeBuilderPoints.length > 0 && routeBuilderPoints[routeBuilderPoints.length - 1].lat === wp.lat) return;
+            routeBuilderPoints.push({ lat: wp.lat, lng: wp.lng });
             routeBuilderPolyline.addLatLng(L.latLng(wp.lat, wp.lng));
         }
 
@@ -1067,6 +1100,7 @@
                     <span>${rt.name} <br><span style="font-size:12px;color:#666">${distStr}</span></span>
                     <div>
                         <button type="button" class="btn-edit" onclick="editRouteName(${index})">✏️</button>
+                        <button type="button" class="btn-copy" onclick="duplicateRoute(${index})">📄</button>
                         <button type="button" class="btn-edit" style="background: #2196f3;" onclick="startEditVertices(${index}, 'route')">🔧</button>
                         <button type="button" class="btn-view" onclick="viewRoute(${index})">Voir</button>
                         <button type="button" class="btn-follow" onclick="startFollowingRoute(${index})">Suivre</button>
